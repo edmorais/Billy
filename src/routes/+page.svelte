@@ -692,6 +692,7 @@
       />
     {:else}
       <div class="welcome">
+        <img src="/billy-mark.svg" alt="" width="96" height="96" draggable="false" />
         <h1>Welcome to Billy</h1>
         <p class="muted">A library collects one or more folders of PDFs. Billy reads them and never changes them.</p>
         <form

@@ -65,7 +65,7 @@
 
 <aside>
   <div class="brand">
-    <Icon name="shelf" size={20} />
+    <img class="mark" src="/billy-mark.svg" alt="" width="26" height="26" draggable="false" />
     <span class="display">Billy</span>
   </div>
 
@@ -176,6 +176,11 @@
 
   .brand span {
     color: var(--fg);
+  }
+
+  .mark {
+    display: block;
+    flex: none;
   }
 
   .section-head {
