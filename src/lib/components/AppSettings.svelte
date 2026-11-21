@@ -226,7 +226,7 @@
   <section class="about">
     <h3>About</h3>
     <div class="about-row">
-      <img src="/billy-mark.svg" alt="" width="40" height="40" />
+      <img src="/billy-mark.svg" alt="" width="32" height="40" />
       <div>
         <div class="display about-name">Billy {version}</div>
         <div class="hint inline">Your PDF bookshelves. Free software under the MIT License.</div>

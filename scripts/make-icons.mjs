@@ -1,8 +1,8 @@
-// Draws Billy's icons: two shelves of a bookcase in the Plum palette.
+// Draws Billy's icons: a letter B made of nine stacked books.
 //
-//   src-tauri/icons/icon-source.svg  the app icon: a rounded tile with a soft inner emboss
-//                                    and an outer shadow
-//   static/billy-mark.svg            the mark used inside the app: just the two shelves
+//   src-tauri/icons/icon-source.svg  the app icon: the B on a rounded "Dusk" tile (violet to
+//                                    wine), with a soft inner emboss and an outer shadow
+//   static/billy-mark.svg            the mark used inside the app: just the nine books
 //
 // Then make the Windows icon files with: npm run tauri icon src-tauri/icons/icon-source.svg
 // Usage: node scripts/make-icons.mjs
@@ -13,52 +13,50 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-const plum = {
-  back: "#211633",
-  wood: "#efe2c8",
-  // [cover, band]
-  books: [
-    ["#f6efe2", "#d8c7a4"],
-    ["#f0b44c", "#c48a22"],
-    ["#e0607e", "#b23f5c"],
-    ["#5fc0b5", "#3e958b"],
-    ["#b48ae8", "#8a63bd"],
-  ],
-};
+// The books, top to bottom: their colours and where each one's right end is. All start at the
+// B's stem on the left. The middle book is the shortest, making the B's waist.
+const COLORS = ["#e0607e", "#f0b44c", "#5fc0b5", "#b48ae8", "#f6efe2", "#e0607e", "#f0b44c", "#5fc0b5", "#b48ae8"];
+const ENDS = [600, 690, 720, 680, 545, 710, 775, 775, 700];
+// These books show their pages; the others show their spines.
+const PAGES_ROWS = [1, 4, 7];
+const PAGES = "#f7f1e3";
+const PAGE_LINE = "#e2d6bd";
+const LEFT = 250;
+const TOP = 180;
+const BOTTOM = 850;
+const GAP = 8;
 
-/** A book standing on `bottom`: [x, width, height, colour, bands]. Leans when `lean` is set. */
-function book(p, bottom, [x, w, h, c, bands = 1], lean = 0) {
-  const [fill, band] = p.books[c % p.books.length];
-  const top = bottom - h;
-  const bandH = Math.max(10, h * 0.05);
-  let s = `<rect x="${x}" y="${top}" width="${w}" height="${h}" rx="${Math.min(14, w / 6)}" fill="${fill}"/>`;
-  if (bands >= 1) s += `<rect x="${x}" y="${top + h * 0.16}" width="${w}" height="${bandH}" fill="${band}"/>`;
-  if (bands >= 2) s += `<rect x="${x}" y="${bottom - h * 0.2}" width="${w}" height="${bandH}" fill="${band}"/>`;
-  return lean ? `<g transform="rotate(${lean} ${lean < 0 ? x + w : x} ${bottom})">${s}</g>` : s;
+/** A darker shade of a colour, for the bands on spines. */
+function darker(hex, amount = 0.22) {
+  const n = parseInt(hex.slice(1), 16);
+  const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => Math.round(v * (1 - amount)));
+  return `#${c.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 }
 
-/** A book lying flat on `bottom`: [x, width, height, colour]. */
-function flat(p, bottom, [x, w, h, c]) {
-  const [fill, band] = p.books[c % p.books.length];
-  return (
-    `<rect x="${x}" y="${bottom - h}" width="${w}" height="${h}" rx="${Math.min(12, h / 4)}" fill="${fill}"/>` +
-    `<rect x="${x + w * 0.12}" y="${bottom - h}" width="${Math.max(10, w * 0.05)}" height="${h}" fill="${band}"/>`
-  );
-}
-
-/** Two shelves of a bookcase, drawn on a 1024 × 1024 canvas, edges running off it. */
-function shelves(p) {
-  let s = `<rect x="0" y="0" width="1024" height="1024" fill="${p.back}"/>`;
-  s += `<rect x="0" y="0" width="150" height="1024" fill="${p.wood}"/>`;
-  s += `<rect x="874" y="0" width="150" height="1024" fill="${p.wood}"/>`;
-  s += `<rect x="0" y="0" width="1024" height="130" fill="${p.wood}"/>`;
-  s += `<rect x="0" y="476" width="1024" height="54" fill="${p.wood}"/>`;
-  s += `<rect x="0" y="880" width="1024" height="144" fill="${p.wood}"/>`;
-  const upper = [[170, 96, 300, 0, 2], [274, 82, 330, 1], [364, 112, 262, 2], [484, 92, 306, 3, 2], [584, 100, 246, 4], [692, 88, 286, 0]];
-  for (const b of upper) s += book(p, 476, b);
-  s += book(p, 476, [788, 64, 250, 2], -10);
-  s += flat(p, 880, [170, 290, 60, 3]) + flat(p, 820, [184, 258, 58, 0]) + flat(p, 762, [176, 276, 58, 1]);
-  for (const b of [[480, 96, 300, 4, 2], [584, 86, 330, 3], [678, 110, 270, 0], [796, 70, 300, 1]]) s += book(p, 880, b);
+/** The nine books. `outline` adds a faint edge, so cream books show on light backgrounds. */
+function books({ outline = false } = {}) {
+  const h = (BOTTOM - TOP + GAP) / ENDS.length - GAP;
+  const edge = outline ? ` stroke="#000000" stroke-opacity="0.18" stroke-width="10"` : "";
+  let s = "";
+  ENDS.forEach((end, r) => {
+    const y = TOP + r * (h + GAP);
+    const w = end - LEFT;
+    const fill = COLORS[r];
+    const band = darker(fill);
+    s += `<rect x="${LEFT}" y="${y}" width="${w}" height="${h}" fill="${fill}"${edge}/>`;
+    if (PAGES_ROWS.includes(r)) {
+      const inset = h * 0.17;
+      s += `<rect x="${LEFT + 16}" y="${y + inset}" width="${w - 30}" height="${h - 2 * inset}" fill="${PAGES}"/>`;
+      for (const f of [0.4, 0.6]) {
+        s += `<line x1="${LEFT + 26}" y1="${y + h * f}" x2="${LEFT + w - 20}" y2="${y + h * f}" stroke="${PAGE_LINE}" stroke-width="5"/>`;
+      }
+    } else {
+      const bw = Math.max(12, h * 0.15);
+      s += `<rect x="${LEFT + 24}" y="${y}" width="${bw}" height="${h}" fill="${band}"/>`;
+      s += `<rect x="${LEFT + w - 24 - bw}" y="${y}" width="${bw}" height="${h}" fill="${band}"/>`;
+      if (w > 360) s += `<rect x="${LEFT + w * 0.38}" y="${y + h / 2 - 6}" width="${w * 0.26}" height="12" fill="${band}"/>`;
+    }
+  });
   return s;
 }
 
@@ -68,6 +66,10 @@ const appIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"
   <!-- Generated by scripts/make-icons.mjs. -->
   <defs>
     <clipPath id="tile"><rect ${tile}/></clipPath>
+    <linearGradient id="dusk" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2d2160"/>
+      <stop offset="1" stop-color="#4a1530"/>
+    </linearGradient>
     <filter id="shade" x="-15%" y="-15%" width="130%" height="135%">
       <feDropShadow dx="0" dy="14" stdDeviation="14" flood-color="#000" flood-opacity="0.38"/>
     </filter>
@@ -78,18 +80,19 @@ const appIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"
       <stop offset="1" stop-color="#000000" stop-opacity="0.45"/>
     </linearGradient>
   </defs>
-  <rect ${tile} fill="${plum.back}" filter="url(#shade)"/>
-  <g clip-path="url(#tile)">${shelves(plum)}</g>
+  <rect ${tile} fill="url(#dusk)" filter="url(#shade)"/>
+  <g clip-path="url(#tile)">${books()}</g>
   <rect x="74" y="74" width="876" height="876" rx="190" fill="none" stroke="url(#rim)" stroke-width="20"/>
   <rect ${tile} fill="none" stroke="#000000" stroke-opacity="0.25" stroke-width="4"/>
 </svg>
 `;
 
-// Inside the app: only the two shelves, with a little of the boards around them.
-const mark = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="110 96 804 820">
+// Inside the app: only the books, on a transparent background, cropped to the B.
+const pad = 12;
+const markBox = `${LEFT - pad} ${TOP - pad} ${Math.max(...ENDS) - LEFT + 2 * pad} ${BOTTOM - TOP + 2 * pad}`;
+const mark = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${markBox}">
   <!-- Generated by scripts/make-icons.mjs. -->
-  <defs><clipPath id="crop"><rect x="110" y="96" width="804" height="820" rx="70"/></clipPath></defs>
-  <g clip-path="url(#crop)">${shelves(plum)}</g>
+  ${books({ outline: true })}
 </svg>
 `;
 

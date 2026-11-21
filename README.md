@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="src-tauri/icons/icon.png" alt="Billy's icon: two shelves of colorful books" width="128" height="128">
+  <img src="src-tauri/icons/icon.png" alt="Billy's icon: a letter B made of nine stacked books" width="128" height="128">
 </p>
 
 <h1 align="center">Billy</h1>

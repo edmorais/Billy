@@ -65,7 +65,7 @@
 
 <aside>
   <div class="brand">
-    <img class="mark" src="/billy-mark.svg" alt="" width="26" height="26" draggable="false" />
+    <img class="mark" src="/billy-mark.svg" alt="" width="22" height="28" draggable="false" />
     <span class="display">Billy</span>
   </div>
 
