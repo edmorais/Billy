@@ -150,7 +150,12 @@ export function installMock() {
       const a = args as Record<string, any>;
       switch (cmd) {
         case "app_version":
-          return "0.1.0 (mock)";
+          return "0.9.0 (mock)";
+        case "plugin:updater|check":
+          // With ?update, pretend a newer version exists.
+          return new URLSearchParams(location.search).has("update")
+            ? { rid: 1, currentVersion: "0.9.0", version: "0.9.1", date: null, body: "Faster covers and small fixes.", rawJson: {} }
+            : null;
         case "get_settings":
           return { ...appSettings };
         case "set_setting":

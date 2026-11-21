@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Billy",
-  "version": "0.1.0",
+  "version": "0.9.0",
   "identifier": "io.github.edmorais.billy",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -38,11 +38,25 @@
     ],
     "resources": {
       "resources/pdfium.dll": "pdfium.dll",
-      "resources/pdfium-LICENSE.txt": "licenses/pdfium-LICENSE.txt"
+      "resources/pdfium-LICENSE.txt": "licenses/pdfium-LICENSE.txt",
+      "licenses/": "licenses/",
+      "../THIRD-PARTY-NOTICES.md": "licenses/THIRD-PARTY-NOTICES.md",
+      "../LICENSE": "licenses/Billy-LICENSE.txt"
     },
+    "createUpdaterArtifacts": true,
     "windows": {
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "installerIcon": "icons/icon.ico"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDA1RDNBMkM1MTAwM0FGNjYKUldSbXJ3TVF4YUxUQlFDTE5LeEVOM1BiMDBLWVlPb2hqTHVPRFRXSVdIMjFPWkF4RFhBWktYdVoK",
+      "endpoints": ["https://github.com/edmorais/Billy/releases/latest/download/latest.json"],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

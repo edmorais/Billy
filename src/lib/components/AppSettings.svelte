@@ -14,8 +14,18 @@
     type ThemeSettings,
   } from "$lib/theme.svelte";
   import Icon from "./Icon.svelte";
+  import { openUrl } from "@tauri-apps/plugin-opener";
+  import { checkForUpdates, installUpdate, setAutoUpdates, updates } from "$lib/updates.svelte";
+  import { formatDate } from "$lib/view";
 
-  let { onClose, onError }: { onClose: () => void; onError: (message: string) => void } = $props();
+  let {
+    version,
+    onClose,
+    onError,
+  }: { version: string; onClose: () => void; onError: (message: string) => void } = $props();
+
+  const REPO = "https://github.com/edmorais/Billy";
+  const open = (url: string) => openUrl(url).catch((err) => onError(String(err)));
 
   let dialog: HTMLDialogElement;
 
@@ -57,6 +67,7 @@
     <button class="icon-btn" aria-label="Close" onclick={() => dialog.close()}><Icon name="x" /></button>
   </header>
 
+  <div class="body">
   <section>
     <h3>Appearance</h3>
     <div class="segmented" role="radiogroup" aria-label="Appearance">
@@ -163,15 +174,66 @@
     </div>
   </section>
 
+  <section>
+    <h3>Updates</h3>
+    <label class="check">
+      <input type="checkbox" checked={updates.auto} onchange={(e) => setAutoUpdates(e.currentTarget.checked)} />
+      Check for updates automatically, once a day
+    </label>
+    <div class="update-row">
+      <button class="btn" onclick={checkForUpdates} disabled={updates.status === "checking" || updates.status === "downloading"}>
+        <Icon name="sync" size={14} /> Check now
+      </button>
+      <span class="hint inline" role="status">
+        {#if updates.status === "checking"}
+          Checking…
+        {:else if updates.status === "none"}
+          Billy {version} is the latest version.
+        {:else if updates.status === "available"}
+          Billy {updates.version} is available.
+        {:else if updates.status === "downloading"}
+          Downloading… {Math.round(updates.progress * 100)}%
+        {:else if updates.status === "error"}
+          Could not check for updates: {updates.error}
+        {:else if updates.lastCheck}
+          Last checked {formatDate(updates.lastCheck)}.
+        {/if}
+      </span>
+      {#if updates.status === "available"}
+        <button class="btn primary" onclick={installUpdate}>Update and restart</button>
+      {/if}
+    </div>
+  </section>
+
+  <section class="about">
+    <h3>About</h3>
+    <div class="about-row">
+      <img src="/billy-mark.svg" alt="" width="40" height="40" />
+      <div>
+        <div class="display about-name">Billy {version}</div>
+        <div class="hint inline">Your PDF bookshelves. Free software under the MIT License.</div>
+      </div>
+    </div>
+    <div class="links">
+      <button class="link" onclick={() => open(REPO)}>Website</button>
+      <button class="link" onclick={() => open(`${REPO}/releases`)}>Release notes</button>
+      <button class="link" onclick={() => open(`${REPO}/issues`)}>Report a problem</button>
+      <button class="link" onclick={() => open(`${REPO}/blob/main/THIRD-PARTY-NOTICES.md`)}>Third-party software</button>
+    </div>
+  </section>
+  </div>
+
   <footer>
     <button class="btn" onclick={() => dialog.close()}>Done</button>
   </footer>
 </dialog>
 
 <style>
+  /* The dialog follows the window: it grows and shrinks with it (up to a comfortable width),
+     the cards reflow, and only the middle scrolls, so the title and Done stay in view. */
   dialog {
-    width: min(760px, calc(100vw - 48px));
-    max-height: calc(100vh - 48px);
+    width: min(1120px, calc(100vw - 64px));
+    max-height: calc(100vh - 64px);
     padding: 0;
     border: 1px solid var(--line);
     border-radius: 10px;
@@ -180,8 +242,29 @@
     box-shadow: 0 12px 40px rgb(0 0 0 / 0.3);
   }
 
+  dialog[open] {
+    display: flex;
+    flex-direction: column;
+  }
+
   dialog::backdrop {
     background: rgb(0 0 0 / 0.35);
+  }
+
+  .body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  header {
+    flex: none;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 14px;
+  }
+
+  footer {
+    flex: none;
   }
 
   header,
@@ -209,6 +292,55 @@
 
   section {
     padding: 0 18px 16px;
+  }
+
+  .check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .check input {
+    margin: 0;
+    accent-color: var(--accent);
+  }
+
+  .update-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 10px;
+  }
+
+  .hint.inline {
+    margin: 0;
+  }
+
+  .about-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .about-name {
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-top: 10px;
+  }
+
+  .link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    text-decoration: underline;
   }
 
   .hint {

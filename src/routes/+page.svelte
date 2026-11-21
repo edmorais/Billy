@@ -16,6 +16,7 @@
   import Reader from "$lib/components/Reader.svelte";
   import AppSettings from "$lib/components/AppSettings.svelte";
   import { applyTheme, readThemeSettings } from "$lib/theme.svelte";
+  import { initUpdates, installUpdate, updates } from "$lib/updates.svelte";
   import { ask } from "@tauri-apps/plugin-dialog";
   import {
     collator,
@@ -580,7 +581,10 @@
 
   onMount(async () => {
     api.appVersion().then((v) => (version = v), showError);
-    api.getSettings().then((s) => applyTheme(readThemeSettings(s.theme as Record<string, unknown>)), showError);
+    api.getSettings().then((s) => {
+      applyTheme(readThemeSettings(s.theme as Record<string, unknown>));
+      initUpdates(s.updates as Record<string, unknown> | undefined);
+    }, showError);
     for (const id of await api.scanningRoots().catch(() => [])) scanning[id] = 0;
     unlisten.push(
       await onScanProgress((p) => {
@@ -653,6 +657,21 @@
   />
 
   <main>
+    {#if (updates.status === "available" && updates.dismissed !== updates.version) || updates.status === "downloading"}
+      <div class="update-banner" role="status">
+        {#if updates.status === "downloading"}
+          <span>Downloading Billy {updates.version}… {Math.round(updates.progress * 100)}%. Billy restarts when it's ready.</span>
+        {:else}
+          <span>
+            <strong>Billy {updates.version} is available.</strong>
+            {#if updates.notes}<span class="notes">{updates.notes}</span>{/if}
+          </span>
+          <span class="spacer"></span>
+          <button class="btn" onclick={() => (updates.dismissed = updates.version)}>Later</button>
+          <button class="btn primary" onclick={installUpdate}>Update and restart</button>
+        {/if}
+      </div>
+    {/if}
     {#if library}
       <Toolbar
         {crumbs}
@@ -760,7 +779,7 @@
 {/if}
 
 {#if showAppSettings}
-  <AppSettings onClose={() => (showAppSettings = false)} onError={showError} />
+  <AppSettings {version} onClose={() => (showAppSettings = false)} onError={showError} />
 {/if}
 
 {#if reading}
@@ -862,6 +881,20 @@
 
   .missing {
     color: var(--danger);
+  }
+
+  .update-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--line);
+    background: color-mix(in srgb, var(--accent) 14%, var(--bg));
+  }
+
+  .update-banner .notes {
+    margin-left: 6px;
+    color: var(--muted);
   }
 
   .link {

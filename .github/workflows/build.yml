@@ -45,8 +45,9 @@ jobs:
         working-directory: src-tauri
         run: cargo test --locked
 
+      # Ordinary builds are not signed for the updater; only the Release workflow has the key.
       - name: Build app and installer
-        run: npm run tauri build
+        run: npm run tauri build -- --config src-tauri/tauri.ci.conf.json
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
