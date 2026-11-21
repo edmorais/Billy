@@ -1,449 +1,456 @@
 <script lang="ts">
-  // Temporary library manager for milestone 1. Milestone 2 replaces it with the browser.
   import { onDestroy, onMount } from "svelte";
-  import { ask, message, open } from "@tauri-apps/plugin-dialog";
   import type { UnlistenFn } from "@tauri-apps/api/event";
-  import { api, onScanFinished, onScanProgress, type Library, type Root } from "$lib/api";
+  import { api, onScanFinished, onScanProgress, type Doc, type FolderNode, type Library } from "$lib/api";
+  import { collator, fold, readSettings, sortDocs, defaultSettings, type SortField, type ViewSettings } from "$lib/view";
+  import Sidebar from "$lib/components/Sidebar.svelte";
+  import Toolbar from "$lib/components/Toolbar.svelte";
+  import DocumentView, { type Group, type Item } from "$lib/components/DocumentView.svelte";
+  import LibrarySettings from "$lib/components/LibrarySettings.svelte";
 
   let version = $state("");
   let libraries = $state<Library[]>([]);
-  let selectedId = $state<number | null>(null);
-  let roots = $state<Root[]>([]);
+  let libraryId = $state<number | null>(null);
+  let settings = $state<ViewSettings>({ ...defaultSettings });
+  let folders = $state<FolderNode[]>([]);
+  let docs = $state<Doc[]>([]);
+  let search = $state("");
+  let selected = $state<string | null>(null);
+  let expanded = $state(new Set<number>());
   let scanning = $state<Record<number, number>>({});
-  let newName = $state("");
-  let editingName = $state<string | null>(null);
   let error = $state("");
+  let notice = $state("");
+  let showSettings = $state(false);
+  let rootsVersion = $state(0);
+  let treeVersion = $state(0);
+  let docsVersion = $state(0);
+  let searchInput = $state<HTMLInputElement>();
+  let firstName = $state("");
 
-  let selected = $derived(libraries.find((l) => l.id === selectedId) ?? null);
-  let unlisten: UnlistenFn[] = [];
-
-  async function run<T>(task: () => Promise<T>): Promise<T | undefined> {
-    error = "";
-    try {
-      return await task();
-    } catch (err) {
-      error = String(err);
+  let library = $derived(libraries.find((l) => l.id === libraryId) ?? null);
+  let folderById = $derived(new Map(folders.map((f) => [f.id, f])));
+  let childrenOf = $derived.by(() => {
+    const map = new Map<number | null, FolderNode[]>();
+    for (const f of folders) {
+      const list = map.get(f.parentId) ?? [];
+      list.push(f);
+      map.set(f.parentId, list);
     }
+    return map;
+  });
+  let folderId = $derived(settings.folderId !== null && folderById.has(settings.folderId) ? settings.folderId : null);
+  let searching = $derived(search.trim() !== "");
+  let recursive = $derived(settings.includeSubfolders || searching);
+  let scanCount = $derived(Object.keys(scanning).length);
+
+  /** The current folder and its parents, from the library down. */
+  let ancestry = $derived.by(() => {
+    const chain: FolderNode[] = [];
+    for (let f = folderId === null ? undefined : folderById.get(folderId); f; f = f.parentId === null ? undefined : folderById.get(f.parentId)) {
+      chain.unshift(f);
+    }
+    return chain;
+  });
+
+  let crumbs = $derived([
+    { id: null as number | null, name: library?.name ?? "" },
+    ...ancestry.map((f) => ({ id: f.id as number | null, name: f.name })),
+  ]);
+
+  let visibleDocs = $derived.by(() => {
+    const query = fold(search.trim());
+    const matching = docs.filter(
+      (d) =>
+        (!query || fold(d.name).includes(query)) &&
+        (settings.filter === "all" || (settings.filter === "read") === d.read),
+    );
+    return sortDocs(matching, settings.sort, settings.desc);
+  });
+
+  let subfolders = $derived(
+    recursive
+      ? []
+      : [...(childrenOf.get(folderId) ?? [])].sort((a, b) => collator.compare(a.name, b.name)),
+  );
+
+  const docItem = (doc: Doc): Item => ({ key: `d${doc.fileId}`, kind: "doc", doc });
+
+  /** Path of a folder below the current one, such as "Sub › Deep". */
+  function relativeLabel(id: number): string {
+    const names: string[] = [];
+    for (let f = folderById.get(id); f && f.id !== folderId; f = f.parentId === null ? undefined : folderById.get(f.parentId)) {
+      names.unshift(f.name);
+    }
+    return names.length ? names.join(" › ") : (folderById.get(id)?.name ?? "");
+  }
+
+  let groups = $derived.by((): Group[] => {
+    if (recursive && settings.groupBySubfolder) {
+      const byFolder = new Map<number, Doc[]>();
+      for (const doc of visibleDocs) {
+        const list = byFolder.get(doc.folderId) ?? [];
+        list.push(doc);
+        byFolder.set(doc.folderId, list);
+      }
+      // Documents directly in the current folder come first, then each subfolder by name.
+      return [...byFolder.entries()]
+        .map(([id, list]) => ({
+          key: `g${id}`,
+          here: id === folderId,
+          label: id === folderId ? `In ${folderById.get(id)?.name ?? "this folder"}` : relativeLabel(id),
+          items: list.map(docItem),
+        }))
+        .sort((a, b) => Number(b.here) - Number(a.here) || collator.compare(a.label, b.label));
+    }
+    const folderItems: Item[] = subfolders.map((f) => ({ key: `f${f.id}`, kind: "folder", folder: f }));
+    return [{ key: "all", label: null, items: [...folderItems, ...visibleDocs.map(docItem)] }];
+  });
+
+  let emptyMessage = $derived(
+    !library
+      ? ""
+      : library.rootCount === 0
+        ? "This library has no folders yet. Open library settings to add one."
+        : searching
+          ? `No file names match "${search.trim()}".`
+          : settings.filter !== "all"
+            ? `No ${settings.filter} documents here.`
+            : "No PDFs in this folder.",
+  );
+
+  // Load the folder tree when the library changes or after a scan.
+  $effect(() => {
+    const id = libraryId;
+    void treeVersion;
+    if (id === null) {
+      folders = [];
+      return;
+    }
+    api.folderTree(id).then((tree) => {
+      if (libraryId === id) folders = tree;
+    }, showError);
+  });
+
+  // Load the documents in scope.
+  let docsRequest = 0;
+  $effect(() => {
+    const id = libraryId;
+    const folder = folderId;
+    const deep = recursive;
+    void docsVersion;
+    const request = ++docsRequest;
+    // The library itself shows only its root folders, unless subfolders are included.
+    if (id === null || (folder === null && !deep)) {
+      docs = [];
+      return;
+    }
+    api.listDocuments(id, folder, deep).then((list) => {
+      if (request === docsRequest) docs = list;
+    }, showError);
+  });
+
+  function showError(err: unknown) {
+    error = String(err);
   }
 
   async function loadLibraries() {
-    libraries = (await run(api.listLibraries)) ?? [];
-    if (selectedId === null || !libraries.some((l) => l.id === selectedId)) {
-      selectedId = libraries[0]?.id ?? null;
+    try {
+      libraries = await api.listLibraries();
+    } catch (err) {
+      showError(err);
+      return;
     }
-    await loadRoots();
+    if (libraryId === null || !libraries.some((l) => l.id === libraryId)) {
+      const first = libraries[0];
+      libraryId = first?.id ?? null;
+      settings = readSettings(first?.viewSettings);
+    }
   }
 
-  async function loadRoots() {
-    roots = selectedId === null ? [] : ((await run(() => api.listRoots(selectedId!))) ?? []);
+  function selectLibrary(id: number) {
+    if (id === libraryId) return;
+    libraryId = id;
+    settings = readSettings(libraries.find((l) => l.id === id)?.viewSettings);
+    search = "";
+    selected = null;
+    expanded = new Set();
   }
 
-  async function select(id: number) {
-    selectedId = id;
-    editingName = null;
-    await loadRoots();
+  let saveTimer: ReturnType<typeof setTimeout> | undefined;
+  function change(update: Partial<ViewSettings>) {
+    settings = { ...settings, ...update };
+    const id = libraryId;
+    const snapshot = { ...settings };
+    const lib = libraries.find((l) => l.id === id);
+    if (lib) lib.viewSettings = snapshot as unknown as Record<string, unknown>;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      if (id !== null) api.saveViewSettings(id, snapshot).catch(showError);
+    }, 300);
   }
 
-  async function createLibrary(event: SubmitEvent) {
-    event.preventDefault();
-    const library = await run(() => api.createLibrary(newName));
-    if (library) {
-      newName = "";
-      selectedId = library.id;
+  function navigate(id: number | null) {
+    selected = null;
+    search = "";
+    if (id !== null) {
+      // Expand the folder's parents in the tree so it stays visible.
+      const open = new Set(expanded);
+      for (let f = folderById.get(id); f && f.parentId !== null; f = folderById.get(f.parentId)) open.add(f.parentId);
+      expanded = open;
+    }
+    change({ folderId: id });
+  }
+
+  function goUp() {
+    if (ancestry.length === 0) return;
+    const current = ancestry[ancestry.length - 1];
+    navigate(current.parentId);
+    selected = `f${current.id}`;
+  }
+
+  function toggle(id: number) {
+    const open = new Set(expanded);
+    if (open.has(id)) open.delete(id);
+    else open.add(id);
+    expanded = open;
+  }
+
+  function sortBy(field: SortField) {
+    change(field === settings.sort ? { desc: !settings.desc } : { sort: field, desc: false });
+  }
+
+  function openItem(item: Item) {
+    if (item.kind === "folder") {
+      navigate(item.folder.id);
+    } else {
+      notice = "Reading documents in Billy arrives in milestone 6.";
+      setTimeout(() => (notice = ""), 3000);
+    }
+  }
+
+  async function createLibrary(name: string): Promise<boolean> {
+    try {
+      const created = await api.createLibrary(name);
       await loadLibraries();
+      selectLibrary(created.id);
+      showSettings = true;
+      return true;
+    } catch (err) {
+      showError(err);
+      return false;
     }
   }
 
-  async function saveName(event: SubmitEvent) {
-    event.preventDefault();
-    if (!selected || editingName === null) return;
-    const renamed = await run(() => api.renameLibrary(selected!.id, editingName!));
-    if (renamed) {
-      editingName = null;
-      await loadLibraries();
+  function refreshAll() {
+    loadLibraries();
+    treeVersion++;
+    docsVersion++;
+    rootsVersion++;
+  }
+
+  function onGlobalKeydown(event: KeyboardEvent) {
+    const target = event.target as HTMLElement;
+    const typing = target.matches("input, select, textarea");
+    if (event.ctrlKey && event.key.toLowerCase() === "f") {
+      event.preventDefault();
+      searchInput?.focus();
+      searchInput?.select();
+    } else if (event.key === "Backspace" && !typing && !showSettings) {
+      event.preventDefault();
+      goUp();
     }
   }
 
-  async function deleteLibrary() {
-    if (!selected) return;
-    const confirmed = await ask(
-      `Delete the library "${selected.name}"?\n\nBilly will forget its folders, favorites and read status. Your files and folders are not touched.`,
-      { title: "Delete library", kind: "warning", okLabel: "Delete library", cancelLabel: "Cancel" },
-    );
-    if (!confirmed) return;
-    await run(() => api.deleteLibrary(selected!.id));
-    selectedId = null;
-    await loadLibraries();
-  }
-
-  async function addFolder() {
-    if (!selected) return;
-    const path = await open({ directory: true, multiple: false, title: `Add a folder to ${selected.name}` });
-    if (typeof path !== "string") return;
-    const root = await run(() => api.addRoot(selected!.id, path));
-    if (root) {
-      scanning[root.id] = 0;
-      await loadLibraries();
-    }
-  }
-
-  async function removeFolder(root: Root) {
-    const confirmed = await ask(
-      `Remove this folder from "${selected?.name}"?\n\n${root.path}\n\nThe folder and its files are not touched.`,
-      { title: "Remove folder", kind: "warning", okLabel: "Remove folder", cancelLabel: "Cancel" },
-    );
-    if (!confirmed) return;
-    const purge = await ask(
-      "Also delete the favorites and read status of the documents in this folder?\n\nIf you keep them, they come back when you add the folder again.",
-      { title: "Remove folder", kind: "info", okLabel: "Delete them", cancelLabel: "Keep them" },
-    );
-    await run(() => api.removeRoot(root.id, purge));
-    await loadLibraries();
-  }
-
-  function formatDate(ms: number | null) {
-    return ms ? new Date(ms).toLocaleString() : "never";
-  }
+  let unlisten: UnlistenFn[] = [];
 
   onMount(async () => {
-    version = (await run(api.appVersion)) ?? "";
-    for (const id of (await run(api.scanningRoots)) ?? []) scanning[id] = 0;
+    api.appVersion().then((v) => (version = v), showError);
+    for (const id of await api.scanningRoots().catch(() => [])) scanning[id] = 0;
     unlisten.push(
       await onScanProgress((p) => {
         scanning[p.rootId] = p.filesFound;
       }),
-      await onScanFinished(async (f) => {
+      await onScanFinished((f) => {
         delete scanning[f.rootId];
-        if (f.error) {
-          error = f.error;
-        } else if (f.report && f.report.errors.length > 0) {
-          await message(
-            `${f.report.errors.length} item(s) could not be read and were skipped:\n\n${f.report.errors.slice(0, 10).join("\n")}`,
-            { title: "Scan finished", kind: "warning" },
-          );
+        if (f.error) showError(f.error);
+        else if (f.report?.errors.length) {
+          error = `${f.report.errors.length} item(s) could not be read and were skipped. First: ${f.report.errors[0]}`;
         }
-        await loadLibraries();
+        refreshAll();
       }),
     );
     await loadLibraries();
   });
 
-  onDestroy(() => unlisten.forEach((fn) => fn()));
+  onDestroy(() => {
+    unlisten.forEach((fn) => fn());
+    clearTimeout(saveTimer);
+  });
 </script>
 
+<svelte:window onkeydown={onGlobalKeydown} />
+
 <div class="app">
-  <aside>
-    <h1>Billy</h1>
-    <h2>Libraries</h2>
-    <ul>
-      {#each libraries as library (library.id)}
-        <li>
-          <button class:active={library.id === selectedId} onclick={() => select(library.id)}>
-            <span>{library.name}</span>
-            <span class="count">{library.documentCount}</span>
-          </button>
-        </li>
-      {/each}
-    </ul>
-    <form onsubmit={createLibrary}>
-      <input bind:value={newName} placeholder="New library name" aria-label="New library name" />
-      <button type="submit" disabled={!newName.trim()}>Add</button>
-    </form>
-    <p class="version">Billy {version}</p>
-  </aside>
+  <Sidebar
+    {libraries}
+    {libraryId}
+    {childrenOf}
+    {expanded}
+    {folderId}
+    {version}
+    onSelectLibrary={selectLibrary}
+    onSelectFolder={navigate}
+    onToggle={toggle}
+    onCreateLibrary={createLibrary}
+    onOpenSettings={() => (showSettings = true)}
+  />
 
   <main>
-    {#if error}
-      <p class="error" role="alert">{error}</p>
-    {/if}
-
-    {#if selected}
-      <header>
-        {#if editingName !== null}
-          <form onsubmit={saveName} class="rename">
-            <input bind:value={editingName} aria-label="Library name" />
-            <button type="submit">Save</button>
-            <button type="button" onclick={() => (editingName = null)}>Cancel</button>
-          </form>
-        {:else}
-          <h2>{selected.name}</h2>
-          <button onclick={() => (editingName = selected!.name)}>Rename</button>
-          <button class="danger" onclick={deleteLibrary}>Delete library</button>
-        {/if}
-      </header>
-      <p class="muted">
-        {selected.documentCount} documents in {selected.rootCount}
-        {selected.rootCount === 1 ? "folder" : "folders"}
-      </p>
-
-      <section>
-        <div class="section-head">
-          <h3>Folders</h3>
-          <button onclick={addFolder}>Add folder…</button>
-        </div>
-        {#if roots.length === 0}
-          <p class="muted">No folders yet. Add a folder to fill this library.</p>
-        {:else}
-          <table>
-            <thead>
-              <tr><th>Folder</th><th>PDFs</th><th>Status</th><th>Last scan</th><th></th></tr>
-            </thead>
-            <tbody>
-              {#each roots as root (root.id)}
-                <tr>
-                  <td class="path">{root.path}</td>
-                  <td>{root.id in scanning ? scanning[root.id] : root.fileCount}</td>
-                  <td>
-                    {#if root.id in scanning}
-                      <span class="badge scanning">Scanning…</span>
-                    {:else if root.status === "offline"}
-                      <span class="badge offline">Offline</span>
-                    {:else}
-                      <span class="badge">OK</span>
-                    {/if}
-                  </td>
-                  <td>{formatDate(root.lastSyncedAt)}</td>
-                  <td><button onclick={() => removeFolder(root)} disabled={root.id in scanning}>Remove</button></td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        {/if}
-      </section>
+    {#if library}
+      <Toolbar
+        {crumbs}
+        {settings}
+        bind:search
+        bind:searchInput
+        onNavigate={navigate}
+        onUp={goUp}
+        onChange={change}
+      />
+      <DocumentView
+        mode={settings.view}
+        {groups}
+        {selected}
+        sort={settings.sort}
+        desc={settings.desc}
+        {emptyMessage}
+        onSelect={(key) => (selected = key)}
+        onOpen={openItem}
+        onSort={sortBy}
+      />
     {:else}
-      <div class="empty">
-        <h2>No library yet</h2>
-        <p class="muted">Create a library on the left, then add folders to it.</p>
+      <div class="welcome">
+        <h1>Welcome to Billy</h1>
+        <p class="muted">A library collects one or more folders of PDFs. Billy reads them and never changes them.</p>
+        <form
+          onsubmit={async (e) => {
+            e.preventDefault();
+            if (await createLibrary(firstName)) firstName = "";
+          }}
+        >
+          <input class="field" bind:value={firstName} placeholder="Name your first library, e.g. Books" aria-label="Library name" />
+          <button class="btn primary" type="submit" disabled={!firstName.trim()}>Create library</button>
+        </form>
       </div>
     {/if}
+
+    <footer class="status">
+      {#if error}
+        <span class="error" role="alert">{error}</span>
+        <button class="link" onclick={() => (error = "")}>Dismiss</button>
+      {:else if notice}
+        <span>{notice}</span>
+      {:else if library}
+        <span>
+          {visibleDocs.length}
+          {visibleDocs.length === 1 ? "document" : "documents"}{#if subfolders.length}, {subfolders.length}
+            {subfolders.length === 1 ? "folder" : "folders"}{/if}
+        </span>
+      {/if}
+      <span class="spacer"></span>
+      {#if scanCount}
+        <span class="muted">Scanning… {Object.values(scanning).reduce((a, b) => a + b, 0)} PDFs found</span>
+      {/if}
+    </footer>
   </main>
 </div>
 
+{#if showSettings && library}
+  <LibrarySettings
+    {library}
+    {scanning}
+    version={rootsVersion}
+    onClose={() => (showSettings = false)}
+    onChanged={refreshAll}
+    onDeleted={() => {
+      showSettings = false;
+      libraryId = null;
+      refreshAll();
+    }}
+    onError={showError}
+  />
+{/if}
+
 <style>
-  :global(:root) {
-    --bg: #f6f4ef;
-    --panel: #ebe7de;
-    --fg: #1f1d1a;
-    --muted: #6b665d;
-    --line: #d6d0c4;
-    --accent: #8a5a2b;
-    --danger: #a23b2a;
-    color-scheme: light dark;
-  }
-
-  @media (prefers-color-scheme: dark) {
-    :global(:root) {
-      --bg: #1b1a18;
-      --panel: #24221f;
-      --fg: #ece8e1;
-      --muted: #a39d92;
-      --line: #3a3732;
-      --accent: #d29a5c;
-      --danger: #e0715f;
-    }
-  }
-
-  :global(body) {
-    margin: 0;
-    background: var(--bg);
-    color: var(--fg);
-    font: 14px/1.4 "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-  }
-
-  :global(button),
-  :global(input) {
-    font: inherit;
-    color: inherit;
-  }
-
   .app {
     display: grid;
     grid-template-columns: 260px 1fr;
     height: 100vh;
   }
 
-  aside {
-    background: var(--panel);
-    border-right: 1px solid var(--line);
-    padding: 16px;
+  main {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    overflow: auto;
-  }
-
-  h1 {
-    margin: 0 0 8px;
-    font-size: 22px;
-  }
-
-  h2 {
-    margin: 0;
-    font-size: 13px;
-    font-weight: 600;
-  }
-
-  aside h2 {
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    font-size: 11px;
-  }
-
-  main h2 {
-    font-size: 20px;
-  }
-
-  ul {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-
-  aside li button {
-    width: 100%;
-    display: flex;
-    justify-content: space-between;
-    padding: 6px 8px;
-    border: 0;
-    border-radius: 6px;
-    background: transparent;
-    text-align: left;
-    cursor: pointer;
-  }
-
-  aside li button:hover {
-    background: color-mix(in srgb, var(--fg) 8%, transparent);
-  }
-
-  aside li button.active {
-    background: color-mix(in srgb, var(--accent) 20%, transparent);
-  }
-
-  .count,
-  .muted,
-  .version {
-    color: var(--muted);
-  }
-
-  .version {
-    margin-top: auto;
-    font-size: 12px;
-  }
-
-  form {
-    display: flex;
-    gap: 6px;
-  }
-
-  input {
-    flex: 1;
     min-width: 0;
-    padding: 5px 8px;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    background: var(--bg);
+    min-height: 0;
   }
 
-  button {
-    padding: 5px 10px;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    background: var(--bg);
-    cursor: pointer;
-  }
-
-  button:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
-
-  button.danger {
-    color: var(--danger);
-  }
-
-  main {
-    padding: 24px 32px;
-    overflow: auto;
-  }
-
-  header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  header h2 {
-    margin-right: auto;
-  }
-
-  .rename {
+  .welcome {
     flex: 1;
-  }
-
-  .section-head {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: space-between;
-    margin-top: 24px;
-  }
-
-  h3 {
-    margin: 0;
-    font-size: 15px;
-  }
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-top: 12px;
-  }
-
-  th,
-  td {
-    text-align: left;
-    padding: 8px;
-    border-bottom: 1px solid var(--line);
-  }
-
-  th {
-    color: var(--muted);
-    font-weight: 600;
-    font-size: 12px;
-  }
-
-  td.path {
-    word-break: break-all;
-  }
-
-  .badge {
-    font-size: 12px;
-    padding: 2px 8px;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--fg) 8%, transparent);
-  }
-
-  .badge.scanning {
-    background: color-mix(in srgb, var(--accent) 25%, transparent);
-  }
-
-  .badge.offline {
-    background: color-mix(in srgb, var(--danger) 25%, transparent);
-  }
-
-  .error {
-    color: var(--danger);
-    background: color-mix(in srgb, var(--danger) 12%, transparent);
-    padding: 8px 12px;
-    border-radius: 6px;
-  }
-
-  .empty {
-    margin-top: 20vh;
+    justify-content: center;
+    gap: 8px;
+    padding: 24px;
     text-align: center;
   }
 
-  .empty h2 {
-    margin-bottom: 4px;
+  .welcome h1 {
+    margin: 0;
+    font-size: 24px;
+  }
+
+  .welcome p {
+    max-width: 420px;
+    margin: 0 0 12px;
+  }
+
+  .welcome form {
+    display: flex;
+    gap: 8px;
+  }
+
+  .welcome input {
+    width: 280px;
+  }
+
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 28px;
+    padding: 0 16px;
+    border-top: 1px solid var(--line);
+    background: var(--panel);
+    font-size: 12px;
+  }
+
+  .spacer {
+    flex: 1;
+  }
+
+  .error {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--danger);
+  }
+
+  .link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    text-decoration: underline;
   }
 </style>

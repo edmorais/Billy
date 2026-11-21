@@ -2,6 +2,7 @@
 //!
 //! The database lives in Billy's own data folder, never in a library folder.
 
+pub mod browse;
 pub mod libraries;
 
 use crate::error::Result;

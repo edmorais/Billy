@@ -9,6 +9,37 @@ export interface Library {
   createdAt: number;
   documentCount: number;
   rootCount: number;
+  viewSettings: Record<string, unknown>;
+}
+
+export interface FolderNode {
+  id: number;
+  rootId: number;
+  parentId: number | null;
+  name: string;
+  relPath: string;
+  rootPath: string;
+  offline: boolean;
+  /** Documents directly in this folder. */
+  count: number;
+  /** Documents in this folder and its subfolders. */
+  total: number;
+}
+
+export interface Doc {
+  fileId: number;
+  name: string;
+  path: string;
+  folderId: number;
+  size: number;
+  modified: number;
+  added: number;
+  pages: number | null;
+  title: string | null;
+  author: string | null;
+  fingerprint: string;
+  read: boolean;
+  favorite: boolean;
 }
 
 export interface Root {
@@ -47,6 +78,11 @@ export const api = {
   createLibrary: (name: string) => invoke<Library>("create_library", { name }),
   renameLibrary: (id: number, name: string) => invoke<Library>("rename_library", { id, name }),
   deleteLibrary: (id: number) => invoke<void>("delete_library", { id }),
+  saveViewSettings: (id: number, settings: object) =>
+    invoke<void>("save_view_settings", { id, settings }),
+  folderTree: (libraryId: number) => invoke<FolderNode[]>("folder_tree", { libraryId }),
+  listDocuments: (libraryId: number, folderId: number | null, recursive: boolean) =>
+    invoke<Doc[]>("list_documents", { libraryId, folderId, recursive }),
   listRoots: (libraryId: number) => invoke<Root[]>("list_roots", { libraryId }),
   scanningRoots: () => invoke<number[]>("scanning_roots"),
   addRoot: (libraryId: number, path: string) => invoke<Root>("add_root", { libraryId, path }),

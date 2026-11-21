@@ -1,7 +1,8 @@
 //! Tauri commands called by the UI.
 
-use crate::db::{self, libraries};
+use crate::db::browse::{self, Document, FolderNode};
 use crate::db::libraries::{Library, Root};
+use crate::db::{self, libraries};
 use crate::error::{Error, Result};
 use crate::fs_guard;
 use crate::scan::{self, ScanReport};
@@ -34,6 +35,26 @@ pub fn rename_library(state: State<AppState>, id: i64, name: String) -> Result<L
 #[tauri::command]
 pub fn delete_library(state: State<AppState>, id: i64) -> Result<()> {
     libraries::delete_library(&state.db(), id)
+}
+
+#[tauri::command]
+pub fn save_view_settings(state: State<AppState>, id: i64, settings: serde_json::Value) -> Result<()> {
+    libraries::save_view_settings(&state.db(), id, &settings)
+}
+
+#[tauri::command]
+pub fn folder_tree(state: State<AppState>, library_id: i64) -> Result<Vec<FolderNode>> {
+    browse::folder_tree(&state.db(), library_id)
+}
+
+#[tauri::command]
+pub fn list_documents(
+    state: State<AppState>,
+    library_id: i64,
+    folder_id: Option<i64>,
+    recursive: bool,
+) -> Result<Vec<Document>> {
+    browse::list_documents(&state.db(), library_id, folder_id, recursive)
 }
 
 #[tauri::command]

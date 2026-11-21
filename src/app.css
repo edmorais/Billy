@@ -1,0 +1,145 @@
+/* Design tokens. Milestone 7 turns these into switchable color and type themes. */
+:root {
+  --bg: #f6f4ef;
+  --panel: #ece8df;
+  --raised: #fffdf9;
+  --fg: #1f1d1a;
+  --muted: #6b665d;
+  --line: #d9d3c7;
+  --accent: #8a5a2b;
+  --accent-fg: #ffffff;
+  --selection: color-mix(in srgb, var(--accent) 18%, transparent);
+  --hover: color-mix(in srgb, var(--fg) 7%, transparent);
+  --danger: #a23b2a;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.12), 0 2px 8px rgb(0 0 0 / 0.08);
+  --radius: 6px;
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-cover: Georgia, "Times New Roman", serif;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1b1a18;
+    --panel: #23211e;
+    --raised: #2a2825;
+    --fg: #ece8e1;
+    --muted: #a39d92;
+    --line: #3a3732;
+    --accent: #d29a5c;
+    --accent-fg: #1b1a18;
+    --danger: #e0715f;
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 2px 8px rgb(0 0 0 / 0.3);
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.4 var(--font-ui);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+input,
+select {
+  user-select: text;
+}
+
+button {
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+  white-space: nowrap;
+}
+
+.btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--raised) 85%, var(--fg));
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+.btn.danger {
+  color: var(--danger);
+}
+
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--fg);
+}
+
+.icon-btn.on {
+  background: var(--selection);
+  color: var(--fg);
+}
+
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.field {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+}
+
+.muted {
+  color: var(--muted);
+}

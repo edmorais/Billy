@@ -3,3 +3,12 @@
 // See: https://svelte.dev/docs/kit/single-page-apps
 // See: https://v2.tauri.app/start/frontend/sveltekit/ for more info
 export const ssr = false;
+
+export async function load() {
+  // In a plain browser during development, use a fake backend so the UI can be worked on.
+  // Release builds drop this code, because import.meta.env.DEV is false there.
+  if (import.meta.env.DEV && !("__TAURI_INTERNALS__" in window)) {
+    const { installMock } = await import("$lib/dev/mock");
+    installMock();
+  }
+}

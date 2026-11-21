@@ -110,7 +110,7 @@ annotations      file_id, copy_path, source_fingerprint, updated_at
   - The main area has a toolbar, then the favorites shelf, then the document view.
 - **Toolbar controls:**
   - breadcrumb path
-  - filename search, limited to the current scope
+  - filename search, covering the current folder and all its subfolders
   - **Include subfolders** switch
   - view mode
   - sort field and direction

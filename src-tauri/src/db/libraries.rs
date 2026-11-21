@@ -14,6 +14,8 @@ pub struct Library {
     pub created_at: i64,
     pub document_count: i64,
     pub root_count: i64,
+    /// View mode, sort order and other browsing choices, stored as JSON for the UI.
+    pub view_settings: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -32,16 +34,19 @@ pub struct Root {
 const LIBRARY_SELECT: &str = "
     SELECT l.id, l.name, l.created_at,
            (SELECT COUNT(*) FROM entries e WHERE e.library_id = l.id),
-           (SELECT COUNT(*) FROM roots r WHERE r.library_id = l.id)
+           (SELECT COUNT(*) FROM roots r WHERE r.library_id = l.id),
+           l.view_settings
     FROM libraries l";
 
 fn library_from_row(row: &Row) -> rusqlite::Result<Library> {
+    let settings: String = row.get(5)?;
     Ok(Library {
         id: row.get(0)?,
         name: row.get(1)?,
         created_at: row.get(2)?,
         document_count: row.get(3)?,
         root_count: row.get(4)?,
+        view_settings: serde_json::from_str(&settings).unwrap_or_else(|_| serde_json::json!({})),
     })
 }
 
@@ -95,6 +100,14 @@ pub fn rename_library(conn: &Connection, id: i64, name: &str) -> Result<Library>
     let name = clean_name(name)?;
     conn.execute("UPDATE libraries SET name = ?2 WHERE id = ?1", params![id, name])?;
     get_library(conn, id)
+}
+
+pub fn save_view_settings(conn: &Connection, id: i64, settings: &serde_json::Value) -> Result<()> {
+    conn.execute(
+        "UPDATE libraries SET view_settings = ?2 WHERE id = ?1",
+        params![id, settings.to_string()],
+    )?;
+    Ok(())
 }
 
 /// Deletes a library and all of Billy's records for it. Files on disk are not touched.
@@ -176,4 +189,11 @@ pub fn purge_orphan_state(conn: &Connection, library_id: i64) -> Result<()> {
 /// Windows paths are case-insensitive, so compare them in lower case.
 fn lowercase_path(path: &str) -> PathBuf {
     PathBuf::from(path.to_lowercase())
+}
+
+/// True when `child` is a folder strictly inside `parent`.
+pub fn is_inside(child: &str, parent: &str) -> bool {
+    let child = lowercase_path(child);
+    let parent = lowercase_path(parent);
+    child != parent && child.starts_with(&parent)
 }

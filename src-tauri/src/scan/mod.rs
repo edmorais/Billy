@@ -56,6 +56,13 @@ pub fn scan_root(
     }
 
     let now = now_ms();
+    // How deep each root of this library sits. When roots overlap, the outermost root owns
+    // the shared documents, so they appear under it in the folder tree.
+    let root_depths: HashMap<i64, usize> = libraries::list_roots(conn, root.library_id)?
+        .into_iter()
+        .map(|r| (r.id, Path::new(&r.path).components().count()))
+        .collect();
+    let my_depth = root_depths.get(&root_id).copied().unwrap_or(0);
     let mut folder_ids: HashMap<PathBuf, i64> = HashMap::new();
     let mut tx = conn.transaction()?;
     let mut in_batch = 0;
@@ -97,13 +104,32 @@ pub fn scan_root(
                 continue;
             }
         };
-        let added = tx.execute(
-            "INSERT OR IGNORE INTO entries (library_id, root_id, file_id, folder_id, date_added)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![root.library_id, root_id, file_id, folder_id, now],
-        )?;
+        let owner: Option<i64> = tx
+            .query_row(
+                "SELECT root_id FROM entries WHERE library_id = ?1 AND file_id = ?2",
+                params![root.library_id, file_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        match owner {
+            None => {
+                tx.execute(
+                    "INSERT INTO entries (library_id, root_id, file_id, folder_id, date_added)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![root.library_id, root_id, file_id, folder_id, now],
+                )?;
+                report.new_files += 1;
+            }
+            Some(owner) if owner != root_id && root_depths.get(&owner).is_some_and(|&d| d > my_depth) => {
+                // An inner root owned this document; this outer root takes it over.
+                tx.execute(
+                    "UPDATE entries SET root_id = ?3, folder_id = ?4 WHERE library_id = ?1 AND file_id = ?2",
+                    params![root.library_id, file_id, root_id, folder_id],
+                )?;
+            }
+            Some(_) => {}
+        }
         report.files += 1;
-        report.new_files += added as u64;
 
         in_batch += 1;
         if in_batch >= BATCH {

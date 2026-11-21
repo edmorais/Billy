@@ -1,6 +1,6 @@
 //! Tests for scanning, including the guarantee that Billy never changes a library folder.
 
-use billy_lib::db::{self, libraries};
+use billy_lib::db::{self, browse, libraries};
 use billy_lib::scan::{fingerprint::fingerprint, scan_root};
 use rusqlite::Connection;
 use std::collections::BTreeMap;
@@ -183,6 +183,70 @@ fn overlapping_roots_do_not_duplicate_documents() {
         scan_root(&mut s.conn, other, &mut |_| {}).unwrap();
     }
     assert_eq!(libraries::get_library(&s.conn, library.id).unwrap().document_count, 2);
+}
+
+#[test]
+fn outer_root_owns_documents_even_when_added_second() {
+    let mut s = setup();
+    let library = libraries::create_library(&s.conn, "Books").unwrap();
+    let inner = add_and_scan(&mut s.conn, library.id, &s.books.join("Sub"));
+    add_and_scan(&mut s.conn, library.id, &s.books);
+
+    let owned_by_inner: i64 = s
+        .conn
+        .query_row("SELECT COUNT(*) FROM entries WHERE root_id = ?1", [inner], |r| r.get(0))
+        .unwrap();
+    assert_eq!(owned_by_inner, 0);
+    assert_eq!(libraries::get_library(&s.conn, library.id).unwrap().document_count, 3);
+}
+
+#[test]
+fn folder_tree_counts_and_hides_nested_roots() {
+    let mut s = setup();
+    let library = libraries::create_library(&s.conn, "Books").unwrap();
+    let outer = add_and_scan(&mut s.conn, library.id, &s.books);
+    let inner = add_and_scan(&mut s.conn, library.id, &s.books.join("Sub"));
+
+    let tree = browse::folder_tree(&s.conn, library.id).unwrap();
+
+    assert!(tree.iter().all(|n| n.root_id == outer), "nested root {inner} should be hidden");
+    let by_name = |name: &str| tree.iter().find(|n| n.name == name).unwrap();
+    let root = by_name("Books");
+    assert_eq!((root.parent_id, root.count, root.total), (None, 1, 3));
+    assert_eq!((by_name("Sub").count, by_name("Sub").total), (1, 2));
+    assert_eq!((by_name("Deep").count, by_name("Deep").total), (1, 1));
+    assert!(tree.iter().all(|n| n.name != ".cache"));
+}
+
+#[test]
+fn list_documents_by_scope() {
+    let mut s = setup();
+    let library = libraries::create_library(&s.conn, "Books").unwrap();
+    add_and_scan(&mut s.conn, library.id, &s.books);
+    let tree = browse::folder_tree(&s.conn, library.id).unwrap();
+    let sub = tree.iter().find(|n| n.name == "Sub").unwrap().id;
+
+    let names = |docs: Vec<browse::Document>| {
+        let mut names: Vec<String> = docs.into_iter().map(|d| d.name).collect();
+        names.sort();
+        names
+    };
+    assert_eq!(names(browse::list_documents(&s.conn, library.id, None, false).unwrap()).len(), 3);
+    assert_eq!(names(browse::list_documents(&s.conn, library.id, Some(sub), false).unwrap()), vec!["b.PDF"]);
+    assert_eq!(
+        names(browse::list_documents(&s.conn, library.id, Some(sub), true).unwrap()),
+        vec!["b.PDF", "big.pdf"]
+    );
+}
+
+#[test]
+fn view_settings_round_trip() {
+    let s = setup();
+    let library = libraries::create_library(&s.conn, "Books").unwrap();
+    assert_eq!(library.view_settings, serde_json::json!({}));
+    let settings = serde_json::json!({ "view": "grid-m", "includeSubfolders": true });
+    libraries::save_view_settings(&s.conn, library.id, &settings).unwrap();
+    assert_eq!(libraries::get_library(&s.conn, library.id).unwrap().view_settings, settings);
 }
 
 #[test]
