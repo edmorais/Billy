@@ -23,20 +23,26 @@
     subfolders: "M2 3h4l1 1h4v3M4 7h4l1 1h5v5H4z",
     group: "M2 3h12M2 7.5h5M2 10.5h5M2 13.5h5M9 7.5h5v6H9z",
     book: "M3 2.5h7.5a2 2 0 0 1 2 2v9H5a2 2 0 0 1-2-2zM3 11.5a2 2 0 0 1 2-2h7.5",
+    star: "M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z",
+    check: "M3 8.5l3 3 7-7",
+    "check-circle": "M8 14.5a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13zM5 8.2l2 2 4-4",
+    external: "M9 2.5h4.5V7M13.5 2.5L7 9M11.5 9.5v3a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3",
+    "folder-open": "M2 12.5V4a1 1 0 0 1 1-1h3l1.5 1.5H12a1 1 0 0 1 1 1V7M2 12.5L4 7h11l-2 5.5z",
+    copy: "M5.5 5.5h7v8h-7zM3.5 10.5v-8h7",
   } as const;
 
   export type IconName = keyof typeof paths;
 </script>
 
 <script lang="ts">
-  let { name, size = 16 }: { name: IconName; size?: number } = $props();
+  let { name, size = 16, filled = false }: { name: IconName; size?: number; filled?: boolean } = $props();
 </script>
 
 <svg
   width={size}
   height={size}
   viewBox="0 0 16 16"
-  fill="none"
+  fill={filled ? "currentColor" : "none"}
   stroke="currentColor"
   stroke-width="1.4"
   stroke-linecap="round"

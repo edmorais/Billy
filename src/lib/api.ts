@@ -100,8 +100,15 @@ export const api = {
   saveViewSettings: (id: number, settings: object) =>
     invoke<void>("save_view_settings", { id, settings }),
   folderTree: (libraryId: number) => invoke<FolderNode[]>("folder_tree", { libraryId }),
-  listDocuments: (libraryId: number, folderId: number | null, recursive: boolean) =>
-    invoke<Doc[]>("list_documents", { libraryId, folderId, recursive }),
+  listDocuments: (libraryId: number, folderId: number | null, recursive: boolean, favoritesOnly = false) =>
+    invoke<Doc[]>("list_documents", { libraryId, folderId, recursive, favoritesOnly }),
+  setFavorite: (libraryId: number, fileIds: number[], favorite: boolean) =>
+    invoke<void>("set_favorite", { libraryId, fileIds, favorite }),
+  setRead: (libraryId: number, fileIds: number[], read: boolean) =>
+    invoke<void>("set_read", { libraryId, fileIds, read }),
+  openWithDefaultApp: (fileId: number) => invoke<void>("open_with_default_app", { fileId }),
+  showInFolder: (fileId: number) => invoke<void>("show_in_folder", { fileId }),
+  openFolder: (folderId: number) => invoke<void>("open_folder", { folderId }),
   listRoots: (libraryId: number) => invoke<Root[]>("list_roots", { libraryId }),
   scanningRoots: () => invoke<number[]>("scanning_roots"),
   addRoot: (libraryId: number, path: string) => invoke<Root>("add_root", { libraryId, path }),

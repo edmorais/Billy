@@ -89,6 +89,15 @@
 
     <span class="sep"></span>
 
+    <button
+      class="toggle"
+      class:on={settings.favoritesOnly}
+      aria-pressed={settings.favoritesOnly}
+      title="Show only favorites"
+      onclick={() => onChange({ favoritesOnly: !settings.favoritesOnly })}
+    >
+      <Icon name="star" filled={settings.favoritesOnly} /> Favorites only
+    </button>
     <select
       class="field"
       aria-label="Show"
@@ -224,7 +233,13 @@
     height: 22px;
   }
 
+  .controls {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+
   .toggle {
+    white-space: nowrap;
     display: inline-flex;
     align-items: center;
     gap: 6px;

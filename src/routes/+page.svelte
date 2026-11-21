@@ -16,6 +16,8 @@
   import Toolbar from "$lib/components/Toolbar.svelte";
   import DocumentView, { type Group, type Item } from "$lib/components/DocumentView.svelte";
   import LibrarySettings from "$lib/components/LibrarySettings.svelte";
+  import ContextMenu, { type MenuEntry } from "$lib/components/ContextMenu.svelte";
+  import FavoritesShelf from "$lib/components/FavoritesShelf.svelte";
 
   let version = $state("");
   let libraries = $state<Library[]>([]);
@@ -52,12 +54,11 @@
   }
 
   function applyThumbUpdates(updates: { fileId: number; status: "ok" | "error"; pages: number | null; title: string | null; author: string | null }[]) {
-    if (updates.length === 0 || docs.length === 0) return;
-    const index = new Map(docs.map((d, i) => [d.fileId, i]));
-    for (const u of updates) {
-      const i = index.get(u.fileId);
-      if (i === undefined) continue;
-      const doc = docs[i];
+    if (updates.length === 0) return;
+    const byId = new Map(updates.map((u) => [u.fileId, u]));
+    for (const doc of [...docs, ...shelfAll]) {
+      const u = byId.get(doc.fileId);
+      if (!u) continue;
       doc.thumbStatus = u.status;
       if (u.status === "ok") {
         doc.pages = u.pages;
@@ -126,9 +127,35 @@
     const matching = docs.filter(
       (d) =>
         (!query || fold(d.name).includes(query)) &&
-        (settings.filter === "all" || (settings.filter === "read") === d.read),
+        (settings.filter === "all" || (settings.filter === "read") === d.read) &&
+        (!settings.favoritesOnly || d.favorite),
     );
     return sortDocs(matching, settings.sort, settings.desc);
+  });
+
+  /** Favorites in the current folder and all its subfolders, for the shelf. */
+  let shelfAll = $state<Doc[]>([]);
+  let shelfDocs = $derived(
+    [...(settings.shelfSubfolders ? shelfAll : shelfAll.filter((d) => d.folderId === scopeId))].sort((a, b) =>
+      collator.compare(a.name, b.name),
+    ),
+  );
+  let shelfVersion = $state(0);
+
+  let shelfRequest = 0;
+  $effect(() => {
+    const id = libraryId;
+    const folder = scopeId;
+    void docsVersion;
+    void shelfVersion;
+    const request = ++shelfRequest;
+    if (id === null) {
+      shelfAll = [];
+      return;
+    }
+    api.listDocuments(id, folder, true, true).then((list) => {
+      if (request === shelfRequest) shelfAll = list;
+    }, showError);
   });
 
   let subfolders = $derived(
@@ -177,9 +204,11 @@
         ? "This library has no folders yet. Open library settings to add one."
         : searching
           ? `No file names match "${search.trim()}".`
-          : settings.filter !== "all"
-            ? `No ${settings.filter} documents here.`
-            : "No PDFs in this folder.",
+          : settings.favoritesOnly
+            ? "No favorites here. Right-click a document and choose Add to favorites."
+            : settings.filter !== "all"
+              ? `No ${settings.filter} documents here.`
+              : "No PDFs in this folder.",
   );
 
   // Load the folder tree when the library changes or after a scan.
@@ -285,12 +314,100 @@
   }
 
   function openItem(item: Item) {
-    if (item.kind === "folder") {
-      navigate(item.folder.id);
-    } else {
-      notice = "Reading documents in Billy arrives in milestone 6.";
-      setTimeout(() => (notice = ""), 3000);
+    if (item.kind === "folder") navigate(item.folder.id);
+    else openDoc(item.doc);
+  }
+
+  // Until the reader arrives (milestone 6), opening a document uses the default PDF app.
+  function openDoc(doc: Doc) {
+    api.openWithDefaultApp(doc.fileId).catch(showError);
+  }
+
+  /** Every loaded copy of a document: the main list and the shelf hold separate objects. */
+  function copiesOf(fileId: number): Doc[] {
+    return [...docs, ...shelfAll].filter((d) => d.fileId === fileId);
+  }
+
+  async function setFavorite(doc: Doc, favorite: boolean) {
+    if (libraryId === null) return;
+    copiesOf(doc.fileId).forEach((d) => (d.favorite = favorite));
+    try {
+      await api.setFavorite(libraryId, [doc.fileId], favorite);
+    } catch (err) {
+      copiesOf(doc.fileId).forEach((d) => (d.favorite = !favorite));
+      showError(err);
     }
+    shelfVersion++;
+  }
+
+  async function setRead(doc: Doc, read: boolean) {
+    if (libraryId === null) return;
+    copiesOf(doc.fileId).forEach((d) => (d.read = read));
+    try {
+      await api.setRead(libraryId, [doc.fileId], read);
+    } catch (err) {
+      copiesOf(doc.fileId).forEach((d) => (d.read = !read));
+      showError(err);
+    }
+  }
+
+  async function copyText(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Older WebView2 builds may refuse the async clipboard; fall back to a hidden field.
+      const field = document.createElement("textarea");
+      field.value = text;
+      document.body.append(field);
+      field.select();
+      document.execCommand("copy");
+      field.remove();
+    }
+    notice = "Path copied.";
+    setTimeout(() => (notice = ""), 2000);
+  }
+
+  let menu = $state<{ x: number; y: number; entries: MenuEntry[] } | null>(null);
+
+  function folderPath(folder: FolderNode): string {
+    return folder.relPath ? `${folder.rootPath}\\${folder.relPath}` : folder.rootPath;
+  }
+
+  function openMenu(point: { x: number; y: number }, item: Item) {
+    if (item.kind === "folder") {
+      const folder = item.folder;
+      menu = {
+        ...point,
+        entries: [
+          { label: "Open", icon: "folder", action: () => navigate(folder.id) },
+          { label: "Open in File Explorer", icon: "folder-open", action: () => api.openFolder(folder.id).catch(showError) },
+          "separator",
+          { label: "Copy path", icon: "copy", action: () => copyText(folderPath(folder)) },
+        ],
+      };
+      return;
+    }
+    const doc = item.doc;
+    menu = {
+      ...point,
+      entries: [
+        { label: "Open with default app", icon: "external", action: () => openDoc(doc) },
+        { label: "Show in folder", icon: "folder-open", action: () => api.showInFolder(doc.fileId).catch(showError) },
+        "separator",
+        doc.favorite
+          ? { label: "Remove from favorites", icon: "star", action: () => setFavorite(doc, false) }
+          : { label: "Add to favorites", icon: "star", filled: true, action: () => setFavorite(doc, true) },
+        doc.read
+          ? { label: "Mark as unread", icon: "check-circle", action: () => setRead(doc, false) }
+          : { label: "Mark as read", icon: "check-circle", action: () => setRead(doc, true) },
+        "separator",
+        { label: "Copy path", icon: "copy", action: () => copyText(doc.path) },
+      ],
+    };
+  }
+
+  function onShelfMenu(event: MouseEvent, doc: Doc) {
+    openMenu({ x: event.clientX, y: event.clientY }, { key: `d${doc.fileId}`, kind: "doc", doc });
   }
 
   async function createLibrary(name: string): Promise<boolean> {
@@ -315,12 +432,12 @@
 
   function onGlobalKeydown(event: KeyboardEvent) {
     const target = event.target as HTMLElement;
-    const typing = target.matches("input, select, textarea");
+    const typing = target.matches?.("input, select, textarea") ?? false;
     if (event.ctrlKey && event.key.toLowerCase() === "f") {
       event.preventDefault();
       searchInput?.focus();
       searchInput?.select();
-    } else if (event.key === "Backspace" && !typing && !showSettings) {
+    } else if (event.key === "Backspace" && !typing && !showSettings && !menu) {
       event.preventDefault();
       goUp();
     }
@@ -360,7 +477,25 @@
   });
 </script>
 
-<svelte:window onkeydown={onGlobalKeydown} />
+<!-- Billy has its own right-click menus; the browser's menu (Back, Reload…) is only kept in text fields. -->
+<svelte:window
+  onkeydown={onGlobalKeydown}
+  oncontextmenu={(e) => {
+    if (!(e.target as HTMLElement).matches?.("input, textarea")) e.preventDefault();
+  }}
+/>
+
+{#if menu}
+  <ContextMenu
+    x={menu.x}
+    y={menu.y}
+    entries={menu.entries}
+    onClose={() => {
+      menu = null;
+      document.querySelector<HTMLElement>(".scroller")?.focus();
+    }}
+  />
+{/if}
 
 <div class="app">
   <Sidebar
@@ -388,6 +523,20 @@
         onUp={goUp}
         onChange={change}
       />
+      {#if shelfAll.length > 0}
+        <FavoritesShelf
+          docs={shelfDocs}
+          total={shelfAll.length}
+          open={settings.shelfOpen}
+          includeSubfolders={settings.shelfSubfolders}
+          {selected}
+          onToggleOpen={() => change({ shelfOpen: !settings.shelfOpen })}
+          onToggleSubfolders={() => change({ shelfSubfolders: !settings.shelfSubfolders })}
+          onSelect={(key) => (selected = key)}
+          onOpen={openDoc}
+          onContextMenu={onShelfMenu}
+        />
+      {/if}
       <DocumentView
         mode={settings.view}
         {groups}
@@ -399,6 +548,7 @@
         onOpen={openItem}
         onSort={sortBy}
         onVisible={requestThumbs}
+        onContextMenu={openMenu}
       />
     {:else}
       <div class="welcome">

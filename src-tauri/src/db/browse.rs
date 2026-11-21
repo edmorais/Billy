@@ -105,12 +105,15 @@ pub struct Document {
 
 /// Lists the documents of a library. With `folder_id`, only that folder, and with `recursive`
 /// also all its subfolders. Without `folder_id`, the whole library. Missing files are left out.
+/// With `favorites_only`, only the library's favorites.
 pub fn list_documents(
     conn: &Connection,
     library_id: i64,
     folder_id: Option<i64>,
     recursive: bool,
+    favorites_only: bool,
 ) -> Result<Vec<Document>> {
+    let favorites = if favorites_only { "AND fav.file_id IS NOT NULL" } else { "" };
     let scope = match (folder_id, recursive) {
         (None, _) => "",
         (Some(_), false) => "AND e.folder_id = ?2",
@@ -132,7 +135,7 @@ pub fn list_documents(
          JOIN files x ON x.id = e.file_id
          LEFT JOIN read_state rs ON rs.library_id = e.library_id AND rs.file_id = e.file_id
          LEFT JOIN favorites fav ON fav.library_id = e.library_id AND fav.file_id = e.file_id
-         WHERE e.library_id = ?1 AND x.missing_since IS NULL {scope}"
+         WHERE e.library_id = ?1 AND x.missing_since IS NULL {scope} {favorites}"
     );
     let mut stmt = conn.prepare(&sql)?;
     let map = |r: &rusqlite::Row| {

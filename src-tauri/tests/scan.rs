@@ -1,6 +1,6 @@
 //! Tests for scanning, including the guarantee that Billy never changes a library folder.
 
-use billy_lib::db::{self, browse, libraries};
+use billy_lib::db::{self, browse, libraries, marks};
 use billy_lib::scan::{fingerprint::fingerprint, scan_root};
 use rusqlite::Connection;
 use std::collections::BTreeMap;
@@ -231,12 +231,79 @@ fn list_documents_by_scope() {
         names.sort();
         names
     };
-    assert_eq!(names(browse::list_documents(&s.conn, library.id, None, false).unwrap()).len(), 3);
-    assert_eq!(names(browse::list_documents(&s.conn, library.id, Some(sub), false).unwrap()), vec!["b.PDF"]);
+    assert_eq!(names(browse::list_documents(&s.conn, library.id, None, false, false).unwrap()).len(), 3);
+    assert_eq!(names(browse::list_documents(&s.conn, library.id, Some(sub), false, false).unwrap()), vec!["b.PDF"]);
     assert_eq!(
-        names(browse::list_documents(&s.conn, library.id, Some(sub), true).unwrap()),
+        names(browse::list_documents(&s.conn, library.id, Some(sub), true, false).unwrap()),
         vec!["b.PDF", "big.pdf"]
     );
+}
+
+#[test]
+fn favorites_and_read_status_belong_to_each_library() {
+    let mut s = setup();
+    let one = libraries::create_library(&s.conn, "One").unwrap();
+    let two = libraries::create_library(&s.conn, "Two").unwrap();
+    add_and_scan(&mut s.conn, one.id, &s.books);
+    add_and_scan(&mut s.conn, two.id, &s.books);
+    let docs = browse::list_documents(&s.conn, one.id, None, false, false).unwrap();
+    let big = docs.iter().find(|d| d.name == "big.pdf").unwrap().file_id;
+    let a = docs.iter().find(|d| d.name == "a.pdf").unwrap().file_id;
+
+    marks::set_favorite(&mut s.conn, one.id, &[big, a], true).unwrap();
+    marks::set_read(&mut s.conn, one.id, &[a], true).unwrap();
+
+    let in_one = browse::list_documents(&s.conn, one.id, None, false, false).unwrap();
+    let in_two = browse::list_documents(&s.conn, two.id, None, false, false).unwrap();
+    assert_eq!(in_one.iter().filter(|d| d.favorite).count(), 2);
+    assert!(in_one.iter().find(|d| d.file_id == a).unwrap().read);
+    assert!(in_two.iter().all(|d| !d.favorite && !d.read), "library Two is unaffected");
+
+    // Favorites in a subfolder, with and without its subfolders.
+    let tree = browse::folder_tree(&s.conn, one.id).unwrap();
+    let sub = tree.iter().find(|n| n.name == "Sub").unwrap().id;
+    assert_eq!(browse::list_documents(&s.conn, one.id, Some(sub), false, true).unwrap().len(), 0);
+    assert_eq!(browse::list_documents(&s.conn, one.id, Some(sub), true, true).unwrap().len(), 1);
+    assert_eq!(browse::list_documents(&s.conn, one.id, None, false, true).unwrap().len(), 2);
+
+    marks::set_favorite(&mut s.conn, one.id, &[big], false).unwrap();
+    marks::set_read(&mut s.conn, one.id, &[a], false).unwrap();
+    let in_one = browse::list_documents(&s.conn, one.id, None, false, false).unwrap();
+    assert_eq!(in_one.iter().filter(|d| d.favorite).count(), 1);
+    assert!(!in_one.iter().find(|d| d.file_id == a).unwrap().read);
+}
+
+#[test]
+fn marks_ignore_files_outside_the_library() {
+    let mut s = setup();
+    let one = libraries::create_library(&s.conn, "One").unwrap();
+    let empty = libraries::create_library(&s.conn, "Empty").unwrap();
+    add_and_scan(&mut s.conn, one.id, &s.books);
+    let ids: Vec<i64> = browse::list_documents(&s.conn, one.id, None, false, false)
+        .unwrap()
+        .iter()
+        .map(|d| d.file_id)
+        .collect();
+
+    marks::set_favorite(&mut s.conn, empty.id, &ids, true).unwrap();
+    marks::set_read(&mut s.conn, empty.id, &ids, true).unwrap();
+
+    assert_eq!(count(&s.conn, "SELECT COUNT(*) FROM favorites"), 0);
+    assert_eq!(count(&s.conn, "SELECT COUNT(*) FROM read_state"), 0);
+}
+
+#[test]
+fn folder_and_file_paths() {
+    let mut s = setup();
+    let library = libraries::create_library(&s.conn, "Books").unwrap();
+    add_and_scan(&mut s.conn, library.id, &s.books);
+    let tree = browse::folder_tree(&s.conn, library.id).unwrap();
+    let root = tree.iter().find(|n| n.parent_id.is_none()).unwrap().id;
+    let deep = tree.iter().find(|n| n.name == "Deep").unwrap().id;
+    assert_eq!(marks::folder_path(&s.conn, root).unwrap(), s.books);
+    assert_eq!(marks::folder_path(&s.conn, deep).unwrap(), s.books.join("Sub").join("Deep"));
+    let doc = &browse::list_documents(&s.conn, library.id, Some(deep), false, false).unwrap()[0];
+    assert_eq!(marks::file_path(&s.conn, doc.file_id).unwrap(), s.books.join("Sub").join("Deep").join("big.pdf"));
 }
 
 #[test]

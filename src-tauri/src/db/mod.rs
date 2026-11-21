@@ -4,6 +4,7 @@
 
 pub mod browse;
 pub mod libraries;
+pub mod marks;
 
 use crate::error::Result;
 use rusqlite::Connection;

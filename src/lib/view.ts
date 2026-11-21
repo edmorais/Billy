@@ -14,6 +14,12 @@ export interface ViewSettings {
   includeSubfolders: boolean;
   groupBySubfolder: boolean;
   filter: ReadFilter;
+  /** Show only favorites in the main view. */
+  favoritesOnly: boolean;
+  /** The favorites shelf also shows favorites from subfolders. */
+  shelfSubfolders: boolean;
+  /** The favorites shelf is expanded. */
+  shelfOpen: boolean;
   /** Folder shown when the library was last open. `null` is the library itself. */
   folderId: number | null;
 }
@@ -25,6 +31,9 @@ export const defaultSettings: ViewSettings = {
   includeSubfolders: false,
   groupBySubfolder: false,
   filter: "all",
+  favoritesOnly: false,
+  shelfSubfolders: true,
+  shelfOpen: true,
   folderId: null,
 };
 

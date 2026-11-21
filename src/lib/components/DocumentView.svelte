@@ -31,9 +31,12 @@
     onSort: (field: SortField) => void;
     /** Called with the documents on screen that still need a thumbnail. */
     onVisible: (fileIds: number[]) => void;
+    /** Right-click, the Menu key or Shift+F10 on an item. */
+    onContextMenu: (point: { x: number; y: number }, item: Item) => void;
   }
 
-  let { mode, groups, selected, sort, desc, emptyMessage, onSelect, onOpen, onSort, onVisible }: Props = $props();
+  let { mode, groups, selected, sort, desc, emptyMessage, onSelect, onOpen, onSort, onVisible, onContextMenu }: Props =
+    $props();
 
   type Row =
     | { kind: "header"; label: string; count: number; top: number; height: number }
@@ -187,6 +190,16 @@
         if (item) onOpen(item);
         break;
       }
+      case "ContextMenu":
+      case "F10": {
+        if (event.key === "F10" && !event.shiftKey) return;
+        const item = flat[index];
+        const element = item && document.getElementById(item.key);
+        if (!item || !element) return;
+        const rect = element.getBoundingClientRect();
+        onContextMenu({ x: rect.left + Math.min(rect.width / 2, 40), y: rect.top + Math.min(rect.height / 2, 40) }, item);
+        break;
+      }
       default:
         return;
     }
@@ -209,6 +222,11 @@
     { field: "added", label: "Added" },
   ];
 </script>
+
+{#snippet badges(doc: Doc)}
+  {#if doc.favorite}<span class="badge fav" title="Favorite"><Icon name="star" size={11} filled /></span>{/if}
+  {#if doc.read}<span class="badge read" title="Read"><Icon name="check" size={11} /></span>{/if}
+{/snippet}
 
 <div class="view mode-{mode}" style:--cover-w="{coverW}px" style:--tile-w="{tileW}px" style:--row-h="{rowH}px">
   {#if mode === "details"}
@@ -268,6 +286,11 @@
                   title={item.kind === "doc" ? item.doc.path : item.folder.name}
                   onclick={() => onSelect(item.key)}
                   ondblclick={() => onOpen(item)}
+                  oncontextmenu={(e) => {
+                    e.preventDefault();
+                    onSelect(item.key);
+                    onContextMenu({ x: e.clientX, y: e.clientY }, item);
+                  }}
                   onkeydown={() => {}}
                 >
                   {#if row.chips && item.kind === "folder"}
@@ -278,13 +301,17 @@
                     <div class="cover-box"><Cover doc={item.doc} /></div>
                     <div class="caption">
                       <span class="name">{displayName(item.doc)}</span>
-                      <span class="meta">{item.doc.pages ? `${item.doc.pages} pages` : formatSize(item.doc.size)}</span>
+                      <span class="meta">
+                        {@render badges(item.doc)}
+                        {item.doc.pages ? `${item.doc.pages} pages` : formatSize(item.doc.size)}
+                      </span>
                     </div>
                   {:else if mode === "details"}
                     {#if item.kind === "doc"}
                       <span class="cell name-cell">
                         <span class="mini"><Cover doc={item.doc} small /></span>
                         <span class="name">{displayName(item.doc)}</span>
+                        {@render badges(item.doc)}
                       </span>
                       <span class="cell">{item.doc.title ?? ""}</span>
                       <span class="cell">{item.doc.author ?? ""}</span>
@@ -302,6 +329,7 @@
                   {:else}
                     <Icon name={item.kind === "doc" ? "book" : "folder"} size={14} />
                     <span class="name">{item.kind === "doc" ? displayName(item.doc) : item.folder.name}</span>
+                    {#if item.kind === "doc"}{@render badges(item.doc)}{/if}
                     <span class="meta">
                       {item.kind === "doc" ? formatSize(item.doc.size) : `${item.folder.total} documents`}
                     </span>
@@ -384,9 +412,25 @@
   }
 
   .meta {
+    display: flex;
+    align-items: center;
+    gap: 4px;
     color: var(--muted);
     font-size: 12px;
     white-space: nowrap;
+  }
+
+  .badge {
+    display: inline-grid;
+    flex: none;
+  }
+
+  .badge.fav {
+    color: var(--accent);
+  }
+
+  .badge.read {
+    color: var(--muted);
   }
 
   /* Grids */

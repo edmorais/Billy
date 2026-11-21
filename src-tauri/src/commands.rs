@@ -2,7 +2,7 @@
 
 use crate::db::browse::{self, Document, FolderNode};
 use crate::db::libraries::{Library, Root};
-use crate::db::{self, libraries};
+use crate::db::{self, libraries, marks};
 use crate::error::{Error, Result};
 use crate::fs_guard;
 use crate::scan::{self, ScanReport};
@@ -53,8 +53,44 @@ pub fn list_documents(
     library_id: i64,
     folder_id: Option<i64>,
     recursive: bool,
+    favorites_only: bool,
 ) -> Result<Vec<Document>> {
-    browse::list_documents(&state.db(), library_id, folder_id, recursive)
+    browse::list_documents(&state.db(), library_id, folder_id, recursive, favorites_only)
+}
+
+#[tauri::command]
+pub fn set_favorite(state: State<AppState>, library_id: i64, file_ids: Vec<i64>, favorite: bool) -> Result<()> {
+    marks::set_favorite(&mut state.db(), library_id, &file_ids, favorite)
+}
+
+#[tauri::command]
+pub fn set_read(state: State<AppState>, library_id: i64, file_ids: Vec<i64>, read: bool) -> Result<()> {
+    marks::set_read(&mut state.db(), library_id, &file_ids, read)
+}
+
+/// Opens a document in the default PDF app. The UI passes an id, never a path, so it can only
+/// open documents that Billy knows.
+#[tauri::command]
+pub fn open_with_default_app(state: State<AppState>, file_id: i64) -> Result<()> {
+    let path = marks::file_path(&state.db(), file_id)?;
+    tauri_plugin_opener::open_path(&path, None::<&str>)
+        .map_err(|e| Error::msg(format!("Windows could not open {}: {e}", path.display())))
+}
+
+/// Opens File Explorer with the document selected.
+#[tauri::command]
+pub fn show_in_folder(state: State<AppState>, file_id: i64) -> Result<()> {
+    let path = marks::file_path(&state.db(), file_id)?;
+    tauri_plugin_opener::reveal_item_in_dir(&path)
+        .map_err(|e| Error::msg(format!("Could not show {}: {e}", path.display())))
+}
+
+/// Opens a library folder in File Explorer.
+#[tauri::command]
+pub fn open_folder(state: State<AppState>, folder_id: i64) -> Result<()> {
+    let path = marks::folder_path(&state.db(), folder_id)?;
+    tauri_plugin_opener::open_path(&path, None::<&str>)
+        .map_err(|e| Error::msg(format!("Could not open {}: {e}", path.display())))
 }
 
 #[tauri::command]

@@ -120,10 +120,23 @@ export function installMock() {
         case "folder_tree":
           return folders;
         case "list_documents": {
-          if (a.folderId === null) return docs;
-          const scope = a.recursive ? descendants(a.folderId) : new Set([a.folderId]);
-          return docs.filter((d) => scope.has(d.folderId));
+          const scope = a.folderId === null ? null : a.recursive ? descendants(a.folderId) : new Set([a.folderId]);
+          return docs
+            .filter((d) => !scope || scope.has(d.folderId))
+            .filter((d) => !a.favoritesOnly || d.favorite)
+            .map((d) => ({ ...d }));
         }
+        case "set_favorite":
+          for (const d of docs) if (a.fileIds.includes(d.fileId)) d.favorite = a.favorite;
+          return null;
+        case "set_read":
+          for (const d of docs) if (a.fileIds.includes(d.fileId)) d.read = a.read;
+          return null;
+        case "open_with_default_app":
+        case "show_in_folder":
+        case "open_folder":
+          console.info("mock:", cmd, args);
+          return null;
         case "list_roots":
           return roots;
         case "scanning_roots":
