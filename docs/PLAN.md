@@ -28,7 +28,7 @@ Out of scope for the first version: full-text search inside PDFs, tags, ratings,
 | Thumbnails and PDF metadata | PDFium, the PDF engine inside Chrome, called from Rust through the `pdfium-render` crate. |
 | Database | SQLite, through the `rusqlite` crate. |
 | Size | About 5,000 PDFs, mostly books. All on local disks. |
-| Annotations | Saved by default to an annotated copy in Billy's own data folder. Two extra commands: "Save to original file" and "Export copy…". |
+| Annotations | Saved by default in Billy's own data folder, as only the bytes PDF.js appends to the original (not a full copy). Two extra commands: "Save to original file" and "Export copy…". |
 | Overlap | One folder can belong to several libraries. One library can have several unrelated root folders. |
 | Missing files | Billy keeps the data of missing files. Deleting it always needs confirmation. |
 | Sync | The first scan happens when you add a folder. After that, sync is something you choose for each folder. |
@@ -61,7 +61,8 @@ Out of scope for the first version: full-text search inside PDFs, tags, ratings,
 - **Billy only reads your folders, and one module enforces this.** All file access to library folders goes through a module in `fs_guard.rs` that opens files read-only. One function in the whole code base can write to a library folder: "Save to original file", which runs only after you confirm it. A test fingerprints a sample folder tree before and after a scan and a sync, and fails if anything changed.
 - **Billy's own data lives in two places:**
   - `%APPDATA%\Billy\billy.db` holds libraries, favorites, read status and settings.
-  - `%APPDATA%\Billy\annotations\` holds the annotated copies. These are user data, so they live in the roaming profile.
+  - `%APPDATA%\Billy\annotations\` holds the annotations: for each annotated document, only the bytes PDF.js appended to the original (usually a few kilobytes). These are user data, so they live in the roaming profile.
+  - `%LOCALAPPDATA%\Billy\annotations\` holds a full annotated copy only in the rare case where a save is not an append. Full copies never go in the roaming profile.
   - `%LOCALAPPDATA%\Billy\thumbs\` is the thumbnail cache. Billy can rebuild it.
 
 ## 4. Data model
@@ -76,10 +77,10 @@ entries          library_id, root_id, file_id, folder_id, date_added     -- one 
 favorites        library_id, file_id, pinned_at
 read_state       library_id, file_id, read (bool), changed_at
 file_state       file_id, last_page, last_opened_at
-annotations      file_id, copy_path, source_fingerprint, updated_at
+annotations      file_id, copy_path, source_fingerprint, updated_at, base_len, base_check
 ```
 
-- **`files` holds one record for each PDF on disk.** The same path in two libraries shares that record, its thumbnail and its annotated copy. Membership in a library and the date added are stored in `entries`.
+- **`files` holds one record for each PDF on disk.** The same path in two libraries shares that record, its thumbnail and its annotations. Membership in a library and the date added are stored in `entries`.
 - **The fingerprint is the file size plus an xxHash3 hash of the first and last 64 KB of the file.** It is quick to compute, even for 5,000 books, and it lets sync recognize a file that was moved or renamed.
 - **Favorites and read status belong to a library.** A book can be read in one library and unread in another. The last page you viewed belongs to the file and is the same in every library.
 
@@ -101,7 +102,7 @@ annotations      file_id, copy_path, source_fingerprint, updated_at
 - **Changed files** (different size or modification time) are fingerprinted again. Their thumbnail and metadata are refreshed.
 - **Moved or renamed files** are recognized by their fingerprint. Favorites, read status and annotations follow the file. This works whichever folder is synced first, and across libraries. A file on an offline folder is never taken as "moved", because its drive is just not there.
 - **Changes during a sync** are not lost: if a folder changes while it is being synced, Billy syncs it again when the first sync ends. The watcher waits until a folder has been quiet for 2 seconds, so copying many books gives one sync.
-- **Missing files** are marked as missing, not deleted. By default they are hidden, and you can show them as greyed-out entries. "Clean up missing files…" lists them and asks for confirmation before deleting their favorites, read status and annotated copies.
+- **Missing files** are marked as missing, not deleted. By default they are hidden, and you can show them as greyed-out entries. "Clean up missing files…" lists them and asks for confirmation before deleting their favorites, read status and annotations.
 - **Offline root folders** happen, for example, when a drive is unplugged. Billy marks the folder as offline and changes nothing. Its files are shown as unavailable.
 
 ### 5.3 Browsing
@@ -164,10 +165,13 @@ annotations      file_id, copy_path, source_fingerprint, updated_at
 - **Built-in features:** find in document, sidebar with page thumbnails and outline, zoom, rotation, page modes and printing.
 - **Annotation tools:** highlight, free text, freehand ink, image or stamp, and signature.
 - **Saving annotations:**
-  - **Ctrl+S** saves the annotated copy into Billy's data folder. Next time, Billy opens that copy. A badge marks the document as annotated.
+  - **Ctrl+S** saves the annotations in Billy's data folder. PDF.js saves by appending to the PDF, so Billy stores only the appended bytes, plus the length of the original they extend and a hash of the original's last 4 KB. When the document is opened again, Billy joins the original's first part with those bytes as it reads them. A badge marks the document as annotated.
   - **"Save to original file…"** writes the annotations into your PDF after you confirm.
   - **"Export copy…"** writes an annotated PDF wherever you choose.
-- **If the original file changes after you annotate it,** Billy warns you when you open it. You then choose between the annotated copy and the new original.
+  - **Large files:** PDF.js reads the whole document before saving, so saving a large book takes a while (about 2 minutes for 800 MB). For files over 100 MB, Billy says so while it saves, exports or writes the original.
+- **If the original file changes after you annotate it,** Billy warns you when you open it.
+  - If the change was appended to the file (as many PDF programs save), the annotated version can still be rebuilt. You choose between the version you annotated, with your annotations, and the new version without them.
+  - If the file was replaced completely, the annotations can no longer be shown. Billy says so, opens the file, and keeps the annotations until you discard them.
 - **Billy remembers the last page** for each file. "Mark as read" is a manual action.
 
 ### 5.8 Themes
@@ -216,7 +220,7 @@ Each milestone ends with a working build and a commit.
 | 3 | **Thumbnails and metadata**: PDFium worker, cache, `thumb://` protocol, visible files first. | Real covers, page counts, titles and authors appear. |
 | 4 | **Favorites, read status and right-click menu**, including opening files in Windows and showing them in Explorer. | All right-click actions work. |
 | 5 | **Sync**: Auto-sync switch, Sync now, watcher, moved and missing files, clean-up with confirmation, offline root folders. | Renaming, moving and deleting files in Explorer give the expected results. |
-| 6 | **Reader**: PDF.js integration, `pdf://` protocol, annotations and the three save modes, last page, warning when the original changed. | You can read, annotate, save, reopen and export. |
+| 6 | **Reader**: PDF.js integration, byte ranges read through Billy's backend (instead of a `pdf://` protocol), annotations and the three save modes, last page, warning when the original changed. | You can read, annotate, save, reopen and export. |
 | 7 | **Visual design**: theme samples, then your choice, then building the themes, a settings page and the app icon. | Themes can be switched in Settings. |
 | 8 | **Releases and updates**: NSIS installer, a GitHub Actions release workflow with signed updates, the updater with its on/off setting, third-party licenses (PDF.js and PDFium) and the README. | Pushing a version tag publishes an installer on GitHub Releases, and an older installed Billy offers to update to it. |
 

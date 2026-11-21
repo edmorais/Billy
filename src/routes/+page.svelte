@@ -15,7 +15,16 @@
   import CleanUpDialog from "$lib/components/CleanUpDialog.svelte";
   import Reader from "$lib/components/Reader.svelte";
   import { ask } from "@tauri-apps/plugin-dialog";
-  import { collator, fold, readSettings, sortDocs, defaultSettings, type SortField, type ViewSettings } from "$lib/view";
+  import {
+    collator,
+    fold,
+    formatSize,
+    readSettings,
+    sortDocs,
+    defaultSettings,
+    type SortField,
+    type ViewSettings,
+  } from "$lib/view";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import Toolbar from "$lib/components/Toolbar.svelte";
   import DocumentView, { type Group, type Item } from "$lib/components/DocumentView.svelte";
@@ -374,7 +383,7 @@
 
   async function discardAnnotations(doc: Doc) {
     const confirmed = await ask(
-      `Discard Billy's annotated copy of "${doc.name}"?\n\nYour annotations will be lost. The original file is not touched.`,
+      `Discard the annotations Billy saved for "${doc.name}"?\n\nThey will be lost. The original file is not touched.`,
       { title: "Discard annotations", kind: "warning", okLabel: "Discard", cancelLabel: "Cancel" },
     );
     if (!confirmed) return;
@@ -387,8 +396,12 @@
   }
 
   async function exportSavedCopy(doc: Doc) {
+    if (doc.size > 100 * 1024 * 1024) {
+      notice = `Exporting a large file (${formatSize(doc.size)}). This can take a little while.`;
+    }
     try {
       const path = await api.exportSavedCopy(doc.fileId);
+      notice = "";
       if (path) flash(`Exported to ${path}`);
     } catch (err) {
       showError(err);

@@ -1,4 +1,4 @@
-﻿<script lang="ts">
+<script lang="ts">
   // The reader: Mozilla's PDF.js viewer in an iframe, with Billy's own bar on top.
   //
   // PDF.js gets the document through a range transport: it asks for the byte ranges it needs
@@ -7,7 +7,7 @@
   import { onDestroy, onMount } from "svelte";
   import { ask } from "@tauri-apps/plugin-dialog";
   import { api, type Doc, type OpenInfo, type PdfSource, type SavedPdf } from "$lib/api";
-  import { displayName } from "$lib/view";
+  import { displayName, formatSize } from "$lib/view";
   import Icon from "./Icon.svelte";
   import ContextMenu, { type MenuEntry } from "./ContextMenu.svelte";
 
@@ -26,10 +26,22 @@
   // Messages show in the reader's own bar; the library's status bar is hidden underneath.
   let message = $state<{ text: string; error: boolean } | null>(null);
   let messageTimer: ReturnType<typeof setTimeout> | undefined;
-  function show(text: string, error = false) {
+  /** Shows a message in the reader's bar. With `sticky`, it stays until the next message. */
+  function show(text: string, error = false, sticky = false) {
     message = { text, error };
     clearTimeout(messageTimer);
-    messageTimer = setTimeout(() => (message = null), error ? 8000 : 4000);
+    if (!sticky) messageTimer = setTimeout(() => (message = null), error ? 8000 : 6000);
+  }
+
+  /** Files above this size take a while to save, because PDF.js reads all of them first. */
+  const LARGE = 100 * 1024 * 1024;
+
+  /** For large files, says that the action may take a while, until it finishes. */
+  function noteIfLarge(action: string) {
+    const size = Math.max(info?.originalSize ?? 0, info?.annotatedSize ?? 0);
+    if (size > LARGE) {
+      show(`${action}… This file is large (${formatSize(size)}), so it can take a minute or two.`, false, true);
+    }
   }
   const onNotice = (text: string) => show(text);
   const onError = (text: string) => {
@@ -198,16 +210,17 @@
     dirty = false;
   }
 
-  /** Saves annotations to Billy's annotated copy. */
+  /** Saves the annotations in Billy's own folder. */
   async function save(): Promise<boolean> {
     if (!app?.pdfDocument || busy) return false;
     busy = true;
+    noteIfLarge("Saving annotations");
     try {
       await api.saveAnnotations(doc.fileId, await currentSave());
       markSaved();
       doc.annotated = true;
       onChanged();
-      onNotice("Annotations saved in Billy's copy. The original file is unchanged.");
+      onNotice("Annotations saved in Billy. The original file is unchanged.");
       return true;
     } catch (err) {
       onError(String(err));
@@ -219,12 +232,14 @@
 
   async function saveToOriginal() {
     if (!app?.pdfDocument || !info) return;
+    const large = info.originalSize > LARGE ? `\n\nThis file is large (${formatSize(info.originalSize)}), so saving can take a minute or two.` : "";
     const confirmed = await ask(
-      `Write the annotations into the original file?\n\n${info.path}\n\nThis changes the file in your folder, and other PDF readers will show the annotations. Billy's annotated copy is then removed.`,
+      `Write the annotations into the original file?\n\n${info.path}\n\nThis changes the file in your folder, and other PDF readers will show the annotations. Billy's saved annotations for it are then removed.${large}`,
       { title: "Save to original file", kind: "warning", okLabel: "Save to original", cancelLabel: "Cancel" },
     );
     if (!confirmed) return;
     busy = true;
+    noteIfLarge("Saving to the original file");
     const page = app.page;
     try {
       await api.saveToOriginal(doc.fileId, await currentSave());
@@ -245,9 +260,11 @@
   async function exportCopy() {
     if (!app?.pdfDocument) return;
     busy = true;
+    noteIfLarge("Preparing the copy");
     try {
       const path = await api.exportCopy(doc.fileId, await currentSave());
       if (path) onNotice(`Exported to ${path}`);
+      else message = null;
     } catch (err) {
       onError(String(err));
     } finally {
@@ -257,7 +274,7 @@
 
   async function discard() {
     const confirmed = await ask(
-      "Discard Billy's annotated copy of this document?\n\nYour annotations will be lost. The original file is not touched.",
+      "Discard the annotations Billy saved for this document?\n\nThey will be lost. The original file is not touched.",
       { title: "Discard annotations", kind: "warning", okLabel: "Discard", cancelLabel: "Cancel" },
     );
     if (!confirmed) return;
@@ -289,10 +306,10 @@
       y: rect.bottom + 4,
       entries: [
         { label: "Save annotations (Ctrl+S)", icon: "check", disabled: !dirty, action: save },
-        { label: "Save to original fileâ€¦", icon: "alert", action: saveToOriginal },
-        { label: "Export copyâ€¦", icon: "external", action: exportCopy },
+        { label: "Save to original file…", icon: "alert", action: saveToOriginal },
+        { label: "Export copy…", icon: "external", action: exportCopy },
         "separator",
-        { label: "Discard annotationsâ€¦", icon: "x", disabled: !doc.annotated, action: discard },
+        { label: "Discard annotations…", icon: "x", disabled: !doc.annotated, action: discard },
       ],
     };
   }
@@ -314,6 +331,13 @@
     let which: PdfSource = info.annotatedSize !== null ? "annotated" : "original";
     if (info.annotatedSize !== null && info.originalChanged) {
       which = (await askChoice("changed")) === "original" ? "original" : "annotated";
+    }
+    if (info.annotationsBroken) {
+      show(
+        "This file was replaced after you annotated it, so Billy can't show your annotations on it. They are kept until you discard them.",
+        true,
+        true,
+      );
     }
     await viewerReady;
     app.eventBus.on("pagechanging", onPageChanging);
@@ -342,7 +366,7 @@
     <div class="title" title={info?.path ?? doc.path}>
       <span class="name">{doc.title?.trim() || displayName(doc)}</span>
       {#if source === "annotated"}
-        <span class="tag">Billy's annotated copy</span>
+        <span class="tag">With your annotations</span>
       {/if}
       {#if dirty}
         <span class="tag unsaved">Unsaved changes</span>
@@ -383,7 +407,7 @@
   <div class="viewer">
     <iframe bind:this={frame} src="/pdfjs/web/viewer.html?file=" title="PDF viewer"></iframe>
     {#if loading}
-      <div class="loading">Openingâ€¦</div>
+      <div class="loading">Opening…</div>
     {/if}
   </div>
 </div>
@@ -398,12 +422,12 @@
       {#if choice === "changed"}
         <h2 id="question-title">The original has changed</h2>
         <p>
-          This file was changed after you annotated it. You can open your annotated copy, or the new original. Your
-          annotations stay in the copy either way.
+          This file was changed after you annotated it. You can open the version you annotated, with your annotations,
+          or the new version without them. Your annotations are kept either way.
         </p>
         <div class="buttons">
-          <button class="btn" onclick={() => choose?.("original")}>Open the new original</button>
-          <button class="btn primary" onclick={() => choose?.("annotated")}>Open my annotated copy</button>
+          <button class="btn" onclick={() => choose?.("original")}>Open the new version</button>
+          <button class="btn primary" onclick={() => choose?.("annotated")}>Open with my annotations</button>
         </div>
       {:else}
         <h2 id="question-title">Save your annotations?</h2>

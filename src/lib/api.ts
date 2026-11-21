@@ -45,7 +45,7 @@ export interface Doc {
   missing: boolean;
   /** Its folder is unavailable, for example an unplugged drive. */
   offline: boolean;
-  /** Billy has an annotated copy of it. */
+  /** Billy has saved annotations for it. */
   annotated: boolean;
 }
 
@@ -65,10 +65,12 @@ export interface OpenInfo {
   name: string;
   path: string;
   originalSize: number;
-  /** Size of the annotated copy, when there is one. */
+  /** Size of the annotated version, when it can be shown. */
   annotatedSize: number | null;
-  /** The original changed after the annotated copy was made. */
+  /** The original changed after it was annotated (the annotations can still be shown). */
   originalChanged: boolean;
+  /** There are saved annotations, but the original was replaced, so they can't be shown. */
+  annotationsBroken: boolean;
   lastPage: number | null;
 }
 

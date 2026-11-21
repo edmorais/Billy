@@ -185,6 +185,7 @@ export function installMock() {
             originalSize: samplePdf.length,
             annotatedSize: null,
             originalChanged: false,
+            annotationsBroken: false,
             lastPage: 2,
           };
         }

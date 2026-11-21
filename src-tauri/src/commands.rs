@@ -135,14 +135,14 @@ fn payload(request: &Request<'_>) -> Result<Payload> {
 pub fn save_annotations(state: State<AppState>, request: Request<'_>) -> Result<()> {
     let file_id = file_id_header(&request)?;
     let from_original = header(&request, "source")? == "original";
-    reader::save_annotated(&state.db(), &state.data_dir(), file_id, &payload(&request)?, from_original)
+    reader::save_annotated(&state.db(), &state.dirs(), file_id, &payload(&request)?, from_original)
 }
 
 /// Writes the document into the original file. The UI asks the user to confirm first.
 #[tauri::command]
 pub fn save_to_original(state: State<AppState>, request: Request<'_>) -> Result<()> {
     let file_id = file_id_header(&request)?;
-    reader::save_to_original(&state.db(), &state.data_dir(), file_id, &payload(&request)?)?;
+    reader::save_to_original(&state.db(), &state.dirs(), file_id, &payload(&request)?)?;
     state.thumbs.wake();
     Ok(())
 }
@@ -186,7 +186,7 @@ fn export_payload(app: &AppHandle, file_id: i64, payload: Payload) -> Result<Opt
 /// Deletes a document's annotated copy from Billy's data folder.
 #[tauri::command]
 pub fn discard_annotations(state: State<AppState>, file_id: i64) -> Result<()> {
-    reader::discard_annotated(&state.db(), &state.data_dir(), file_id)
+    reader::discard_annotated(&state.db(), &state.dirs(), file_id)
 }
 
 /// Syncs one root folder now, in the background.
@@ -227,14 +227,14 @@ pub fn list_missing(state: State<AppState>, library_id: i64) -> Result<Vec<Missi
 }
 
 /// Forgets missing files in a library, after the user confirmed it, and deletes their
-/// annotated copies from Billy's data folder.
+/// saved annotations from Billy's data folders.
 #[tauri::command]
 pub fn clean_up_missing(state: State<AppState>, library_id: i64, file_ids: Vec<i64>) -> Result<()> {
     let copies = missing::clean_up(&mut state.db(), library_id, &file_ids)?;
-    let data_dir = state.data_dir();
+    let dirs = state.dirs();
     for copy in copies {
-        // Only ever delete inside Billy's own data folder.
-        if copy.starts_with(&data_dir) {
+        // Only ever delete inside Billy's own data folders.
+        if dirs.owns(&copy) {
             let _ = std::fs::remove_file(copy);
         }
     }

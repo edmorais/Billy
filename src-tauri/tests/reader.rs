@@ -1,7 +1,7 @@
-﻿//! Tests for the reader: reading ranges, annotated copies, and saving to the original.
+//! Tests for the reader: reading ranges, stored annotations, and saving to the original.
 
 use billy_lib::db::{self, browse, libraries};
-use billy_lib::reader::{self, Payload, Source};
+use billy_lib::reader::{self, Dirs, Payload, Source};
 use billy_lib::scan::scan_root;
 use rusqlite::Connection;
 use std::fs;
@@ -18,9 +18,9 @@ fn pdf_bytes(label: &str, size: usize) -> Vec<u8> {
 }
 
 struct Setup {
-    _dirs: (TempDir, TempDir),
+    _dirs: (TempDir, TempDir, TempDir),
     conn: Connection,
-    data: PathBuf,
+    dirs: Dirs,
     book: PathBuf,
     library: i64,
     root: i64,
@@ -29,22 +29,37 @@ struct Setup {
 
 fn setup() -> Setup {
     let tree = TempDir::new().unwrap();
-    let data_dir = TempDir::new().unwrap();
+    let roaming = TempDir::new().unwrap();
+    let local = TempDir::new().unwrap();
     let books = billy_lib::fs_guard::canonical_dir(tree.path()).unwrap().join("Books");
     fs::create_dir_all(&books).unwrap();
     let book = books.join("book.pdf");
     fs::write(&book, pdf_bytes("original", 300_000)).unwrap();
-    let data = data_dir.path().to_path_buf();
-    let mut conn = db::open(&data.join("billy.db")).unwrap();
+    let dirs = Dirs { roaming: roaming.path().to_path_buf(), local: local.path().to_path_buf() };
+    let mut conn = db::open(&dirs.roaming.join("billy.db")).unwrap();
     let library = libraries::create_library(&conn, "L").unwrap().id;
     let root = libraries::insert_root(&conn, library, &books.to_string_lossy()).unwrap().id;
     scan_root(&mut conn, root, &mut |_| {}).unwrap();
     let file = browse::list_documents(&conn, library, None, true, false).unwrap()[0].file_id;
-    Setup { _dirs: (tree, data_dir), conn, data, book, library, root, file }
+    Setup { _dirs: (tree, roaming, local), conn, dirs, book, library, root, file }
 }
 
 fn annotated(s: &Setup) -> bool {
     browse::list_documents(&s.conn, s.library, None, true, false).unwrap()[0].annotated
+}
+
+/// What PDF.js sends when it appends `tail` to the open version of length `base_len`.
+fn append(version: &[u8], source: Source, tail: &[u8]) -> Payload {
+    Payload::Append {
+        source,
+        base_len: version.len() as u64,
+        probe: version[version.len() - 4096..].to_vec(),
+        tail: tail.to_vec(),
+    }
+}
+
+fn read_all(s: &Setup, source: Source) -> Vec<u8> {
+    reader::read_range(&s.conn, s.file, source, 0, u64::MAX).unwrap()
 }
 
 #[test]
@@ -57,67 +72,140 @@ fn reads_ranges_of_the_original() {
 
     assert_eq!(reader::read_range(&s.conn, s.file, Source::Original, 0, 100).unwrap(), whole[..100]);
     assert_eq!(reader::read_range(&s.conn, s.file, Source::Original, 1000, 5000).unwrap(), whole[1000..6000]);
-    // Past the end gives what is there.
     let tail = reader::read_range(&s.conn, s.file, Source::Original, whole.len() as u64 - 10, 1000).unwrap();
     assert_eq!(tail, whole[whole.len() - 10..]);
     assert!(reader::read_range(&s.conn, s.file, Source::Annotated, 0, 10).is_err());
 }
 
 #[test]
-fn annotations_go_to_a_copy_in_billys_folder() {
+fn annotations_are_stored_as_the_appended_bytes_only() {
     let s = setup();
-    let before = fs::read(&s.book).unwrap();
+    let original = fs::read(&s.book).unwrap();
     let book_mtime = fs::metadata(&s.book).unwrap().modified().unwrap();
-    let copy = pdf_bytes("annotated", 1_000);
+    let note = b"\n% a note, as PDF.js appends it\n%%EOF\n";
 
-    reader::save_annotated(&s.conn, &s.data, s.file, &Payload::Full(copy.to_vec()), true).unwrap();
+    reader::save_annotated(&s.conn, &s.dirs, s.file, &append(&original, Source::Original, note), true).unwrap();
 
-    assert_eq!(fs::read(&s.book).unwrap(), before, "the original is untouched");
+    // Only the note is stored, in the roaming folder; no full copy anywhere.
+    assert_eq!(fs::read(s.dirs.delta_path(s.file)).unwrap(), note);
+    assert!(!s.dirs.copy_path(s.file).exists());
+    assert_eq!(fs::read(&s.book).unwrap(), original, "the original is untouched");
     assert_eq!(fs::metadata(&s.book).unwrap().modified().unwrap(), book_mtime);
-    let copy_file = reader::copy_path(&s.data, s.file);
-    assert!(copy_file.starts_with(&s.data));
-    assert_eq!(fs::read(&copy_file).unwrap(), copy);
     assert!(annotated(&s));
+
+    // The annotated version is the original followed by the note.
+    let mut expected = original.clone();
+    expected.extend_from_slice(note);
     let info = reader::open_info(&s.conn, s.file).unwrap();
-    assert_eq!(info.annotated_size, Some(copy.len() as i64));
-    assert!(!info.original_changed);
-    assert_eq!(reader::read_range(&s.conn, s.file, Source::Annotated, 0, 20).unwrap(), copy[..20]);
+    assert_eq!(info.annotated_size, Some(expected.len() as i64));
+    assert!(!info.original_changed && !info.annotations_broken);
+    assert_eq!(read_all(&s, Source::Annotated), expected);
+    let middle = original.len() as u64 - 10;
+    assert_eq!(reader::read_range(&s.conn, s.file, Source::Annotated, middle, 20).unwrap(), expected[middle as usize..middle as usize + 20]);
 
-    reader::discard_annotated(&s.conn, &s.data, s.file).unwrap();
-    assert!(!copy_file.exists());
+    reader::discard_annotated(&s.conn, &s.dirs, s.file).unwrap();
+    assert!(!s.dirs.delta_path(s.file).exists());
     assert!(!annotated(&s));
 }
 
 #[test]
-fn notices_when_the_original_changes_after_annotating() {
-    let mut s = setup();
-    reader::save_annotated(&s.conn, &s.data, s.file, &Payload::Full(pdf_bytes("annotated", 1_000)), true).unwrap();
+fn saving_again_from_the_annotated_version_extends_the_stored_bytes() {
+    let s = setup();
+    let original = fs::read(&s.book).unwrap();
+    reader::save_annotated(&s.conn, &s.dirs, s.file, &append(&original, Source::Original, b"% first\n"), true).unwrap();
+    let opened = read_all(&s, Source::Annotated);
 
-    // Someone edits the original in another program.
-    fs::write(&s.book, pdf_bytes("edited elsewhere", 310_000)).unwrap();
+    reader::save_annotated(&s.conn, &s.dirs, s.file, &append(&opened, Source::Annotated, b"% second\n"), false).unwrap();
+
+    assert_eq!(fs::read(s.dirs.delta_path(s.file)).unwrap(), b"% first\n% second\n");
+    let mut expected = opened.clone();
+    expected.extend_from_slice(b"% second\n");
+    assert_eq!(read_all(&s, Source::Annotated), expected);
+}
+
+#[test]
+fn a_whole_document_that_extends_the_original_is_stored_as_its_extra_bytes() {
+    let s = setup();
+    let mut whole = fs::read(&s.book).unwrap();
+    whole.extend_from_slice(b"% appended\n");
+
+    reader::save_annotated(&s.conn, &s.dirs, s.file, &Payload::Full(whole.clone()), true).unwrap();
+
+    assert_eq!(fs::read(s.dirs.delta_path(s.file)).unwrap(), b"% appended\n");
+    assert_eq!(read_all(&s, Source::Annotated), whole);
+}
+
+#[test]
+fn a_rewritten_document_is_kept_as_a_local_copy() {
+    let s = setup();
+    let rewritten = pdf_bytes("rewritten by the reader", 1_000);
+
+    reader::save_annotated(&s.conn, &s.dirs, s.file, &Payload::Full(rewritten.clone()), true).unwrap();
+
+    assert_eq!(fs::read(s.dirs.copy_path(s.file)).unwrap(), rewritten);
+    assert!(s.dirs.copy_path(s.file).starts_with(&s.dirs.local), "full copies never roam");
+    assert!(!s.dirs.delta_path(s.file).exists());
+    assert_eq!(read_all(&s, Source::Annotated), rewritten);
+
+    // A later appended save switches back to the small form.
+    let original = fs::read(&s.book).unwrap();
+    reader::save_annotated(&s.conn, &s.dirs, s.file, &append(&original, Source::Original, b"% note\n"), true).unwrap();
+    assert!(!s.dirs.copy_path(s.file).exists());
+    assert!(s.dirs.delta_path(s.file).exists());
+}
+
+#[test]
+fn annotations_survive_an_original_that_was_appended_to() {
+    let mut s = setup();
+    let original = fs::read(&s.book).unwrap();
+    reader::save_annotated(&s.conn, &s.dirs, s.file, &append(&original, Source::Original, b"% note\n"), true).unwrap();
+
+    // Another program saves its own changes by appending to the file.
+    let mut edited = original.clone();
+    edited.extend_from_slice(b"% another program's update\n");
+    fs::write(&s.book, &edited).unwrap();
     scan_root(&mut s.conn, s.root, &mut |_| {}).unwrap();
-    assert!(reader::open_info(&s.conn, s.file).unwrap().original_changed);
 
-    // Saving the old annotated copy again keeps the warning.
-    reader::save_annotated(&s.conn, &s.data, s.file, &Payload::Full(pdf_bytes("annotated 2", 1_000)), false).unwrap();
-    assert!(reader::open_info(&s.conn, s.file).unwrap().original_changed);
-
-    // Annotating the new original clears it.
-    reader::save_annotated(&s.conn, &s.data, s.file, &Payload::Full(pdf_bytes("annotated 3", 1_000)), true).unwrap();
-    assert!(!reader::open_info(&s.conn, s.file).unwrap().original_changed);
+    let info = reader::open_info(&s.conn, s.file).unwrap();
+    assert!(info.original_changed);
+    assert!(!info.annotations_broken);
+    let mut expected = original.clone();
+    expected.extend_from_slice(b"% note\n");
+    assert_eq!(read_all(&s, Source::Annotated), expected, "the annotated version is still the old one plus the note");
 }
 
 #[test]
-fn save_to_original_replaces_the_file_and_drops_the_copy() {
+fn a_replaced_original_makes_the_annotations_unshowable_but_keeps_them() {
     let mut s = setup();
-    reader::save_annotated(&s.conn, &s.data, s.file, &Payload::Full(pdf_bytes("annotated", 1_000)), true).unwrap();
-    let new_bytes = pdf_bytes("annotated into original", 320_000);
+    let original = fs::read(&s.book).unwrap();
+    reader::save_annotated(&s.conn, &s.dirs, s.file, &append(&original, Source::Original, b"% note\n"), true).unwrap();
 
-    reader::save_to_original(&s.conn, &s.data, s.file, &Payload::Full(new_bytes.clone())).unwrap();
+    fs::write(&s.book, pdf_bytes("a different edition", 290_000)).unwrap();
+    scan_root(&mut s.conn, s.root, &mut |_| {}).unwrap();
 
-    assert_eq!(fs::read(&s.book).unwrap(), new_bytes);
+    let info = reader::open_info(&s.conn, s.file).unwrap();
+    assert!(info.annotations_broken);
+    assert_eq!(info.annotated_size, None);
+    assert!(reader::read_range(&s.conn, s.file, Source::Annotated, 0, 10).is_err());
+    assert!(annotated(&s), "the annotations are kept until discarded");
+    reader::discard_annotated(&s.conn, &s.dirs, s.file).unwrap();
     assert!(!annotated(&s));
-    assert!(!reader::copy_path(&s.data, s.file).exists());
+}
+
+#[test]
+fn save_to_original_appends_the_annotations_and_drops_the_stored_ones() {
+    let mut s = setup();
+    let original = fs::read(&s.book).unwrap();
+    reader::save_annotated(&s.conn, &s.dirs, s.file, &append(&original, Source::Original, b"% note\n"), true).unwrap();
+    let opened = read_all(&s, Source::Annotated);
+
+    reader::save_to_original(&s.conn, &s.dirs, s.file, &append(&opened, Source::Annotated, b"% more\n")).unwrap();
+
+    let mut expected = opened.clone();
+    expected.extend_from_slice(b"% more\n");
+    assert_eq!(fs::read(&s.book).unwrap(), expected);
+    assert!(!annotated(&s));
+    assert!(!s.dirs.delta_path(s.file).exists());
     let folder = s.book.parent().unwrap();
     let names: Vec<_> = fs::read_dir(folder).unwrap().map(|e| e.unwrap().file_name()).collect();
     assert_eq!(names, vec![std::ffi::OsString::from("book.pdf")], "no temporary file is left behind");
@@ -131,69 +219,37 @@ fn save_to_original_replaces_the_file_and_drops_the_copy() {
 }
 
 #[test]
-fn refuses_to_write_something_that_is_not_a_pdf() {
-    let s = setup();
-    let before = fs::read(&s.book).unwrap();
-
-    assert!(reader::save_to_original(&s.conn, &s.data, s.file, &Payload::Full(b"<html>oops</html>".to_vec())).is_err());
-    assert!(reader::save_annotated(&s.conn, &s.data, s.file, &Payload::Full(b"not a pdf".to_vec()), true).is_err());
-
-    assert_eq!(fs::read(&s.book).unwrap(), before);
-    assert!(!reader::copy_path(&s.data, s.file).exists());
-}
-
-#[test]
-fn appended_saves_copy_the_rest_from_disk() {
+fn refuses_bad_saves_and_leaves_everything_as_it_was() {
     let s = setup();
     let original = fs::read(&s.book).unwrap();
-    let base_len = original.len() as u64;
-    let tail = b"\n% new objects and xref\n%%EOF\n".to_vec();
-    let probe = original[original.len() - 4096..].to_vec();
-    let payload = Payload::Append { source: Source::Original, base_len, probe, tail: tail.clone() };
+    let mut wrong_probe = append(&original, Source::Original, b"% tail\n");
+    if let Payload::Append { probe, .. } = &mut wrong_probe {
+        probe[0] ^= 0xff;
+    }
 
-    reader::save_annotated(&s.conn, &s.data, s.file, &payload, true).unwrap();
-    let mut expected = original.clone();
-    expected.extend_from_slice(&tail);
-    assert_eq!(fs::read(reader::copy_path(&s.data, s.file)).unwrap(), expected);
-    assert_eq!(fs::read(&s.book).unwrap(), original, "the original is untouched");
+    assert!(reader::save_to_original(&s.conn, &s.dirs, s.file, &Payload::Full(b"<html>oops</html>".to_vec())).is_err());
+    assert!(reader::save_annotated(&s.conn, &s.dirs, s.file, &Payload::Full(b"not a pdf".to_vec()), true).is_err());
+    assert!(reader::save_annotated(&s.conn, &s.dirs, s.file, &wrong_probe, true).is_err());
+    assert!(reader::save_to_original(&s.conn, &s.dirs, s.file, &wrong_probe).is_err());
 
-    // Appending again to the annotated copy builds on the copy.
-    let copy_len = expected.len() as u64;
-    let more = b"% second save\n".to_vec();
-    let probe = expected[expected.len() - 100..].to_vec();
-    let payload = Payload::Append { source: Source::Annotated, base_len: copy_len, probe, tail: more.clone() };
-    reader::save_annotated(&s.conn, &s.data, s.file, &payload, false).unwrap();
-    expected.extend_from_slice(&more);
-    assert_eq!(fs::read(reader::copy_path(&s.data, s.file)).unwrap(), expected);
-
-    // Into the original, after confirmation.
-    let probe = original[original.len() - 4096..].to_vec();
-    let payload = Payload::Append { source: Source::Original, base_len, probe, tail: tail.clone() };
-    reader::save_to_original(&s.conn, &s.data, s.file, &payload).unwrap();
-    let mut into_original = original.clone();
-    into_original.extend_from_slice(&tail);
-    assert_eq!(fs::read(&s.book).unwrap(), into_original);
-}
-
-#[test]
-fn appended_save_refuses_a_file_that_changed() {
-    let s = setup();
-    let original = fs::read(&s.book).unwrap();
-    let mut wrong_probe = original[original.len() - 4096..].to_vec();
-    wrong_probe[0] ^= 0xff;
-    let payload = Payload::Append {
-        source: Source::Original,
-        base_len: original.len() as u64,
-        probe: wrong_probe,
-        tail: b"% tail\n".to_vec(),
-    };
-
-    assert!(reader::save_annotated(&s.conn, &s.data, s.file, &payload, true).is_err());
-    assert!(reader::save_to_original(&s.conn, &s.data, s.file, &payload).is_err());
     assert_eq!(fs::read(&s.book).unwrap(), original);
-    assert!(!reader::copy_path(&s.data, s.file).exists());
-    let folder = s.book.parent().unwrap();
-    assert_eq!(fs::read_dir(folder).unwrap().count(), 1, "no temporary file is left behind");
+    assert!(!annotated(&s));
+    assert!(!s.dirs.delta_path(s.file).exists() && !s.dirs.copy_path(s.file).exists());
+    assert_eq!(fs::read_dir(s.book.parent().unwrap()).unwrap().count(), 1, "no temporary file is left behind");
+}
+
+#[test]
+fn exports_the_annotated_version() {
+    let s = setup();
+    let original = fs::read(&s.book).unwrap();
+    reader::save_annotated(&s.conn, &s.dirs, s.file, &append(&original, Source::Original, b"% note\n"), true).unwrap();
+    let size = reader::open_info(&s.conn, s.file).unwrap().annotated_size.unwrap() as u64;
+    let out = s.dirs.local.join("exported.pdf");
+
+    let whole = Payload::Append { source: Source::Annotated, base_len: size, probe: Vec::new(), tail: Vec::new() };
+    reader::export(&s.conn, s.file, &whole, &out).unwrap();
+
+    assert_eq!(fs::read(&out).unwrap(), read_all(&s, Source::Annotated));
 }
 
 #[test]

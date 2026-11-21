@@ -1,3 +1,4 @@
+use crate::reader::Dirs;
 use crate::thumbs::ThumbQueue;
 use crate::watch::SyncWatcher;
 use rusqlite::Connection;
@@ -36,8 +37,11 @@ impl AppState {
         self.db.lock().unwrap()
     }
 
-    /// Billy's own data folder, %APPDATA%\Billy.
-    pub fn data_dir(&self) -> PathBuf {
-        self.db_path.parent().map(PathBuf::from).unwrap_or_default()
+    /// Billy's own data folders: %APPDATA%\Billy (roaming) and %LOCALAPPDATA%\Billy (local).
+    pub fn dirs(&self) -> Dirs {
+        Dirs {
+            roaming: self.db_path.parent().map(PathBuf::from).unwrap_or_default(),
+            local: self.thumbs_dir.parent().map(PathBuf::from).unwrap_or_default(),
+        }
     }
 }

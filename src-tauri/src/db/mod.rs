@@ -16,6 +16,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 const MIGRATIONS: &[&str] = &[
     include_str!("migrations/001_initial.sql"),
     include_str!("migrations/002_thumb_index.sql"),
+    include_str!("migrations/003_annotation_deltas.sql"),
 ];
 
 /// Opens (or creates) the database at `path` and brings its schema up to date.
