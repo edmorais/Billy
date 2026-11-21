@@ -32,5 +32,15 @@ coverage/
 *.log
 npm-debug.log*
 
+# SvelteKit and Vite
+.svelte-kit/
+/package
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Rust and Tauri
+src-tauri/target/
+src-tauri/gen/schemas/
+
 # Local Claude Code settings
 .claude/settings.local.json
