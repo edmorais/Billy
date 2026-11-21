@@ -79,7 +79,26 @@
     }
     return map;
   });
-  let folderId = $derived(settings.folderId !== null && folderById.has(settings.folderId) ? settings.folderId : null);
+  /** When a library has just one folder, the library shows that folder's contents directly. */
+  let singleRoot = $derived.by(() => {
+    const tops = childrenOf.get(null) ?? [];
+    return tops.length === 1 ? tops[0] : null;
+  });
+  /** The tree as the sidebar shows it, with a single root folder folded into the library. */
+  let treeChildren = $derived.by(() => {
+    if (!singleRoot) return childrenOf;
+    const map = new Map(childrenOf);
+    map.set(null, childrenOf.get(singleRoot.id) ?? []);
+    return map;
+  });
+  /** The folder picked by the user; `null` is the library itself. */
+  let folderId = $derived(
+    settings.folderId !== null && folderById.has(settings.folderId) && settings.folderId !== singleRoot?.id
+      ? settings.folderId
+      : null,
+  );
+  /** The folder whose contents are shown. */
+  let scopeId = $derived(folderId ?? singleRoot?.id ?? null);
   let searching = $derived(search.trim() !== "");
   let recursive = $derived(settings.includeSubfolders || searching);
   let scanCount = $derived(Object.keys(scanning).length);
@@ -87,7 +106,11 @@
   /** The current folder and its parents, from the library down. */
   let ancestry = $derived.by(() => {
     const chain: FolderNode[] = [];
-    for (let f = folderId === null ? undefined : folderById.get(folderId); f; f = f.parentId === null ? undefined : folderById.get(f.parentId)) {
+    for (
+      let f = folderId === null ? undefined : folderById.get(folderId);
+      f && f.id !== singleRoot?.id;
+      f = f.parentId === null ? undefined : folderById.get(f.parentId)
+    ) {
       chain.unshift(f);
     }
     return chain;
@@ -111,7 +134,7 @@
   let subfolders = $derived(
     recursive
       ? []
-      : [...(childrenOf.get(folderId) ?? [])].sort((a, b) => collator.compare(a.name, b.name)),
+      : [...(childrenOf.get(scopeId) ?? [])].sort((a, b) => collator.compare(a.name, b.name)),
   );
 
   const docItem = (doc: Doc): Item => ({ key: `d${doc.fileId}`, kind: "doc", doc });
@@ -119,7 +142,7 @@
   /** Path of a folder below the current one, such as "Sub › Deep". */
   function relativeLabel(id: number): string {
     const names: string[] = [];
-    for (let f = folderById.get(id); f && f.id !== folderId; f = f.parentId === null ? undefined : folderById.get(f.parentId)) {
+    for (let f = folderById.get(id); f && f.id !== scopeId; f = f.parentId === null ? undefined : folderById.get(f.parentId)) {
       names.unshift(f.name);
     }
     return names.length ? names.join(" › ") : (folderById.get(id)?.name ?? "");
@@ -137,8 +160,8 @@
       return [...byFolder.entries()]
         .map(([id, list]) => ({
           key: `g${id}`,
-          here: id === folderId,
-          label: id === folderId ? `In ${folderById.get(id)?.name ?? "this folder"}` : relativeLabel(id),
+          here: id === scopeId,
+          label: id === scopeId ? `In ${folderById.get(id)?.name ?? "this folder"}` : relativeLabel(id),
           items: list.map(docItem),
         }))
         .sort((a, b) => Number(b.here) - Number(a.here) || collator.compare(a.label, b.label));
@@ -176,7 +199,7 @@
   let docsRequest = 0;
   $effect(() => {
     const id = libraryId;
-    const folder = folderId;
+    const folder = scopeId;
     const deep = recursive;
     void docsVersion;
     const request = ++docsRequest;
@@ -231,6 +254,7 @@
   }
 
   function navigate(id: number | null) {
+    if (id === singleRoot?.id) id = null;
     selected = null;
     search = "";
     if (id !== null) {
@@ -342,7 +366,7 @@
   <Sidebar
     {libraries}
     {libraryId}
-    {childrenOf}
+    childrenOf={treeChildren}
     {expanded}
     {folderId}
     {version}

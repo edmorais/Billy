@@ -101,7 +101,7 @@
         <span class="name">All of {current.name}</span>
         <span class="count">{current.documentCount}</span>
       </button>
-      {#if roots.length === 0}
+      {#if current.rootCount === 0}
         <p class="hint">
           No folders yet.
           <button class="link" onclick={onOpenSettings}>Add a folder</button>

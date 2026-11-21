@@ -66,8 +66,11 @@ function build() {
       addDocs(sub, 150);
     }
   }
-  const papers = addFolder(2, null, "Papers", "", "E:\\Papers");
-  addDocs(papers, 40);
+  // Open http://localhost:1420/?single to try a library with only one folder.
+  if (!new URLSearchParams(location.search).has("single")) {
+    const papers = addFolder(2, null, "Papers", "", "E:\\Papers");
+    addDocs(papers, 40);
+  }
 
   // Totals, deepest first.
   for (const f of [...folders].reverse()) {
