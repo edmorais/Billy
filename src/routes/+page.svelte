@@ -672,7 +672,7 @@
   />
 {/if}
 
-<TitleBar reading={reading !== null} />
+<TitleBar reading={reading !== null} showSearch={library !== null && reading === null} bind:search bind:searchInput />
 
 <div class="app" class:resizing>
   <!-- A focusable separator with a value is the ARIA pattern for a resizable splitter, so it
@@ -729,8 +729,7 @@
       <Toolbar
         {crumbs}
         {settings}
-        bind:search
-        bind:searchInput
+        {search}
         onNavigate={navigate}
         onUp={goUp}
         onChange={change}

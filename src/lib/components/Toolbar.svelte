@@ -10,8 +10,8 @@
   interface Props {
     crumbs: Crumb[];
     settings: ViewSettings;
+    /** The search in the title bar; while it is set, documents can be grouped by folder. */
     search: string;
-    searchInput?: HTMLInputElement;
     onNavigate: (id: number | null) => void;
     onUp: () => void;
     onChange: (change: Partial<ViewSettings>) => void;
@@ -20,8 +20,7 @@
   let {
     crumbs,
     settings,
-    search = $bindable(),
-    searchInput = $bindable(),
+    search,
     onNavigate,
     onUp,
     onChange,
@@ -43,26 +42,6 @@
         {/if}
       {/each}
     </nav>
-    <label class="search">
-      <Icon name="search" size={14} />
-      <input
-        bind:this={searchInput}
-        bind:value={search}
-        placeholder="Search file names"
-        aria-label="Search file names"
-        onkeydown={(e) => {
-          if (e.key === "Escape") {
-            search = "";
-            (e.currentTarget as HTMLInputElement).blur();
-          }
-        }}
-      />
-      {#if search}
-        <button class="icon-btn clear" aria-label="Clear search" onclick={() => (search = "")}>
-          <Icon name="x" size={12} />
-        </button>
-      {/if}
-    </label>
   </div>
 
   <div class="row controls">
@@ -201,37 +180,6 @@
     max-width: 50%;
     color: var(--fg);
     font-weight: 600;
-  }
-
-  .search {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    width: 260px;
-    height: 30px;
-    padding: 0 4px 0 8px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    background: var(--raised);
-    color: var(--muted);
-  }
-
-  .search:focus-within {
-    border-color: var(--accent);
-  }
-
-  .search input {
-    flex: 1;
-    min-width: 0;
-    border: 0;
-    outline: 0;
-    background: transparent;
-    color: var(--fg);
-  }
-
-  .clear {
-    width: 22px;
-    height: 22px;
   }
 
   .controls {

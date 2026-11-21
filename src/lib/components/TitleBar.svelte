@@ -3,8 +3,17 @@
   // the rest continues the main area. Drag it to move the window; double-click to maximize.
   import { onDestroy, onMount } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import Icon from "./Icon.svelte";
 
-  let { reading = false }: { reading?: boolean } = $props();
+  interface Props {
+    reading?: boolean;
+    /** Shows the file-name search, just before the window buttons. */
+    showSearch?: boolean;
+    search?: string;
+    searchInput?: HTMLInputElement;
+  }
+
+  let { reading = false, showSearch = false, search = $bindable(""), searchInput = $bindable() }: Props = $props();
 
   const win = getCurrentWindow();
   let maximized = $state(false);
@@ -38,6 +47,29 @@
     <span class="name display">Billy</span>
   </div>
   <div class="rest" data-tauri-drag-region></div>
+  {#if showSearch}
+    <label class="search">
+      <Icon name="search" size={14} />
+      <input
+        bind:this={searchInput}
+        bind:value={search}
+        placeholder="Search file names"
+        aria-label="Search file names"
+        title="Search file names (Ctrl+F)"
+        onkeydown={(e) => {
+          if (e.key === "Escape") {
+            search = "";
+            (e.currentTarget as HTMLInputElement).blur();
+          }
+        }}
+      />
+      {#if search}
+        <button class="icon-btn clear" aria-label="Clear search" onclick={() => (search = "")}>
+          <Icon name="x" size={12} />
+        </button>
+      {/if}
+    </label>
+  {/if}
   <div class="controls">
     <button class="control" aria-label="Minimize" title="Minimize" onclick={() => win.minimize()}>
       <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M0 5h10" stroke="currentColor" /></svg>
@@ -110,6 +142,42 @@
 
   .rest {
     flex: 1;
+    min-width: 24px;
+  }
+
+  .search {
+    display: flex;
+    align-items: center;
+    align-self: center;
+    gap: 6px;
+    flex: 0 1 260px;
+    min-width: 120px;
+    height: 26px;
+    margin-right: 10px;
+    padding: 0 3px 0 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--raised);
+    color: var(--muted);
+    user-select: text;
+  }
+
+  .search:focus-within {
+    border-color: var(--accent);
+  }
+
+  .search input {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--fg);
+  }
+
+  .clear {
+    width: 20px;
+    height: 20px;
   }
 
   .blurred .name,
