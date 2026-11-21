@@ -109,6 +109,11 @@ fn deleted_file_is_missing_until_it_returns() {
     assert_eq!(listed.len(), 1);
     assert!(listed[0].favorite);
 
+    // Counts leave missing files out.
+    assert_eq!(libraries::get_library(&s.conn, library).unwrap().document_count, 1);
+    let tree = browse::folder_tree(&s.conn, library).unwrap();
+    assert_eq!(tree.iter().find(|n| n.parent_id.is_none()).unwrap().total, 1);
+
     // A second sync does not count it again.
     assert_eq!(sync(&mut s.conn, root).missing, 0);
 
@@ -117,6 +122,7 @@ fn deleted_file_is_missing_until_it_returns() {
     sync(&mut s.conn, root);
     let back = docs(&s.conn, library);
     assert_eq!(back.len(), 2);
+    assert_eq!(libraries::get_library(&s.conn, library).unwrap().document_count, 2);
     assert!(doc(&back, "a.pdf").favorite);
     assert!(missing::list_missing(&s.conn, library).unwrap().is_empty());
 }

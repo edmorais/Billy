@@ -451,6 +451,31 @@
     };
   }
 
+  /** Menu for a library in the sidebar, and for its "All of …" item. */
+  function openLibraryMenu(event: MouseEvent, lib: Library) {
+    menu = {
+      x: event.clientX,
+      y: event.clientY,
+      entries: [
+        {
+          label: lib.rootCount > 1 ? "Sync all folders now" : "Sync now",
+          icon: "sync",
+          disabled: lib.rootCount === 0,
+          action: () => api.syncLibrary(lib.id).catch(showError),
+        },
+        "separator",
+        {
+          label: "Library settings…",
+          icon: "settings",
+          action: () => {
+            selectLibrary(lib.id);
+            showSettings = true;
+          },
+        },
+      ],
+    };
+  }
+
   /** Syncs the root folder that holds this folder. */
   function syncFolder(folder: FolderNode) {
     scanning[folder.rootId] = 0;
@@ -565,6 +590,7 @@
     onCreateLibrary={createLibrary}
     onOpenSettings={() => (showSettings = true)}
     onFolderMenu={(e, node) => openMenu({ x: e.clientX, y: e.clientY }, { key: `f${node.id}`, kind: "folder", folder: node })}
+    onLibraryMenu={openLibraryMenu}
   />
 
   <main>

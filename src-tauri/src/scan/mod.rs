@@ -81,6 +81,8 @@ pub fn scan_root(
         return Ok(report);
     }
 
+    // Tell the UI right away that this folder is syncing.
+    progress(&ScanProgress { root_id, files_found: 0 });
     let now = now_ms();
     let roots = all_roots(conn)?;
     let my_depth = roots.get(&root_id).map(|r| r.depth).unwrap_or(0);

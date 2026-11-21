@@ -17,6 +17,7 @@
     onCreateLibrary: (name: string) => Promise<boolean>;
     onOpenSettings: () => void;
     onFolderMenu: (event: MouseEvent, node: FolderNode) => void;
+    onLibraryMenu: (event: MouseEvent, library: Library) => void;
   }
 
   let {
@@ -32,7 +33,13 @@
     onCreateLibrary,
     onOpenSettings,
     onFolderMenu,
+    onLibraryMenu,
   }: Props = $props();
+
+  function libraryMenu(event: MouseEvent, library: Library) {
+    event.preventDefault();
+    onLibraryMenu(event, library);
+  }
 
   let creating = $state(false);
   let newName = $state("");
@@ -69,7 +76,12 @@
   <ul class="libraries">
     {#each libraries as library (library.id)}
       <li>
-        <button class="library" class:current={library.id === libraryId} onclick={() => onSelectLibrary(library.id)}>
+        <button
+          class="library"
+          class:current={library.id === libraryId}
+          onclick={() => onSelectLibrary(library.id)}
+          oncontextmenu={(e) => libraryMenu(e, library)}
+        >
           <span class="name">{library.name}</span>
           <span class="count">{library.documentCount}</span>
         </button>
@@ -98,7 +110,12 @@
       </button>
     </div>
     <div class="tree">
-      <button class="all" class:current={folderId === null} onclick={() => onSelectFolder(null)}>
+      <button
+        class="all"
+        class:current={folderId === null}
+        onclick={() => onSelectFolder(null)}
+        oncontextmenu={(e) => libraryMenu(e, current)}
+      >
         <Icon name="shelf" size={14} />
         <span class="name">All of {current.name}</span>
         <span class="count">{current.documentCount}</span>

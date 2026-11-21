@@ -33,7 +33,8 @@ pub struct Root {
 
 const LIBRARY_SELECT: &str = "
     SELECT l.id, l.name, l.created_at,
-           (SELECT COUNT(*) FROM entries e WHERE e.library_id = l.id),
+           (SELECT COUNT(*) FROM entries e JOIN files x ON x.id = e.file_id
+            WHERE e.library_id = l.id AND x.missing_since IS NULL),
            (SELECT COUNT(*) FROM roots r WHERE r.library_id = l.id),
            l.view_settings
     FROM libraries l";
