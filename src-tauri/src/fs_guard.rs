@@ -4,8 +4,8 @@
 //! to library folders goes through this module, and nothing here can write, create, rename or
 //! delete. Other modules must not call `std::fs` on library paths directly.
 //!
-//! The one planned exception is "Save to original file" in the reader, which will get its own
-//! clearly named function here and only runs after the user confirms.
+//! The one exception is [`write_original`], used only by "Save to original file" in the reader
+//! after the user confirms it.
 
 use std::fs::{File, Metadata, OpenOptions};
 use std::io;
@@ -72,6 +72,37 @@ fn is_ignored(entry: &DirEntry) -> bool {
         }
     }
     false
+}
+
+/// THE ONLY FUNCTION THAT WRITES TO A LIBRARY FOLDER. Replaces a PDF with new contents, for
+/// "Save to original file" in the reader, after the user has confirmed it.
+///
+/// The new contents, produced by `write`, go to a temporary `~$billy-…` file next to the
+/// original first (the scanner ignores `~$` names). Only if that file is complete and starts
+/// like a PDF does it replace the original, in one step. So a failed or wrong write never
+/// leaves the original damaged.
+pub fn write_original(path: &Path, write: impl FnOnce(&mut io::BufWriter<File>) -> io::Result<()>) -> io::Result<()> {
+    if !path.is_file() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, "the original file is gone"));
+    }
+    let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let tmp = path.with_file_name(format!("~$billy-{name}.tmp"));
+    let result = (|| {
+        let mut out = io::BufWriter::new(File::create(&tmp)?);
+        write(&mut out)?;
+        io::Write::flush(&mut out)?;
+        drop(out);
+        let mut head = [0u8; 5];
+        io::Read::read_exact(&mut File::open(&tmp)?, &mut head)?;
+        if &head != b"%PDF-" {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "refusing to write something that is not a PDF"));
+        }
+        std::fs::rename(&tmp, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
 }
 
 pub fn is_pdf(path: &Path) -> bool {

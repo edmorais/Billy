@@ -231,6 +231,7 @@
   {/if}
   {#if doc.favorite}<span class="badge fav" title="Favorite"><Icon name="star" size={11} filled /></span>{/if}
   {#if doc.read}<span class="badge read" title="Read"><Icon name="check" size={11} /></span>{/if}
+  {#if doc.annotated}<span class="badge read" title="Annotated in Billy"><Icon name="pen" size={11} /></span>{/if}
 {/snippet}
 
 <div class="view mode-{mode}" style:--cover-w="{coverW}px" style:--tile-w="{tileW}px" style:--row-h="{rowH}px">

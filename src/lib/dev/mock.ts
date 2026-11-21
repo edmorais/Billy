@@ -53,6 +53,7 @@ function build() {
         // A few files have disappeared from disk, to try the missing-file views.
         missing: fileId % 997 === 0,
         offline: false,
+        annotated: false,
       });
       fileId++;
     }
@@ -83,6 +84,39 @@ function build() {
   }
   return { folders, docs };
 }
+
+/** A small valid PDF with three pages of text, for trying the reader. */
+function makeSamplePdf(): Uint8Array {
+  const pages = 3;
+  const objects: string[] = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    `<< /Type /Pages /Kids [${Array.from({ length: pages }, (_, i) => `${4 + i * 2} 0 R`).join(" ")}] /Count ${pages} >>`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  // With ?big the sample is padded past 1 MB, so the reader reads it in ranges.
+  const padding = new URLSearchParams(location.search).has("big") ? " ".repeat(1_200_000) : "";
+  objects[2] = `<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /BillyPadding (${padding}) >>`;
+  for (let i = 0; i < pages; i++) {
+    objects.push(
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents ${5 + i * 2} 0 R >>`,
+    );
+    const text = `BT /F1 28 Tf 72 760 Td (Billy sample, page ${i + 1}) Tj /F1 12 Tf 0 -40 Td (Select this text to try highlighting.) Tj ET`;
+    objects.push(`<< /Length ${text.length} >>\nstream\n${text}\nendstream`);
+  }
+  let out = "%PDF-1.7\n";
+  const offsets: number[] = [];
+  objects.forEach((body, i) => {
+    offsets.push(out.length);
+    out += `${i + 1} 0 obj\n${body}\nendobj\n`;
+  });
+  const xref = out.length;
+  out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const o of offsets) out += `${String(o).padStart(10, "0")} 00000 n \n`;
+  out += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return new TextEncoder().encode(out);
+}
+
+const samplePdf = makeSamplePdf();
 
 export function installMock() {
   const { folders, docs } = build();
@@ -142,6 +176,29 @@ export function installMock() {
         case "sync_root":
         case "sync_library":
           return null;
+        case "open_document": {
+          const d = docs.find((x) => x.fileId === a.fileId)!;
+          return {
+            fileId: d.fileId,
+            name: d.name,
+            path: d.path,
+            originalSize: samplePdf.length,
+            annotatedSize: null,
+            originalChanged: false,
+            lastPage: 2,
+          };
+        }
+        case "read_pdf":
+          (window as any).__billyReads = ((window as any).__billyReads ?? 0) + 1;
+          return samplePdf.slice(a.start, a.start + a.length).buffer;
+        case "set_last_page":
+        case "save_annotations":
+        case "save_to_original":
+        case "discard_annotations":
+          console.info("mock:", cmd, a);
+          return null;
+        case "export_copy":
+          return "C:\\mock\\export.pdf";
         case "set_auto_sync": {
           const root = roots.find((r) => r.id === a.rootId)!;
           root.autoSync = a.on;

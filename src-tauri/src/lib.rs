@@ -2,6 +2,7 @@ pub mod commands;
 pub mod db;
 pub mod error;
 pub mod fs_guard;
+pub mod reader;
 pub mod scan;
 pub mod state;
 pub mod thumbs;
@@ -72,6 +73,14 @@ pub fn run() {
             commands::open_with_default_app,
             commands::show_in_folder,
             commands::open_folder,
+            commands::open_document,
+            commands::read_pdf,
+            commands::set_last_page,
+            commands::save_annotations,
+            commands::save_to_original,
+            commands::export_copy,
+            commands::export_saved_copy,
+            commands::discard_annotations,
             commands::sync_root,
             commands::sync_library,
             commands::set_auto_sync,

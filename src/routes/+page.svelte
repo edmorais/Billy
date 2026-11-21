@@ -13,6 +13,8 @@
     type ScanReport,
   } from "$lib/api";
   import CleanUpDialog from "$lib/components/CleanUpDialog.svelte";
+  import Reader from "$lib/components/Reader.svelte";
+  import { ask } from "@tauri-apps/plugin-dialog";
   import { collator, fold, readSettings, sortDocs, defaultSettings, type SortField, type ViewSettings } from "$lib/view";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import Toolbar from "$lib/components/Toolbar.svelte";
@@ -356,11 +358,41 @@
     else openDoc(item.doc);
   }
 
-  // Until the reader arrives (milestone 6), opening a document uses the default PDF app.
+  /** The document open in the reader, if any. The library stays underneath, as it was. */
+  let reading = $state<Doc | null>(null);
+
   function openDoc(doc: Doc) {
     if (doc.missing) return flash("This file is no longer on disk.");
     if (doc.offline) return flash("This file's folder is unavailable. Is its drive connected?");
+    menu = null;
+    reading = doc;
+  }
+
+  function openWithDefaultApp(doc: Doc) {
     api.openWithDefaultApp(doc.fileId).catch(showError);
+  }
+
+  async function discardAnnotations(doc: Doc) {
+    const confirmed = await ask(
+      `Discard Billy's annotated copy of "${doc.name}"?\n\nYour annotations will be lost. The original file is not touched.`,
+      { title: "Discard annotations", kind: "warning", okLabel: "Discard", cancelLabel: "Cancel" },
+    );
+    if (!confirmed) return;
+    try {
+      await api.discardAnnotations(doc.fileId);
+      copiesOf(doc.fileId).forEach((d) => (d.annotated = false));
+    } catch (err) {
+      showError(err);
+    }
+  }
+
+  async function exportSavedCopy(doc: Doc) {
+    try {
+      const path = await api.exportSavedCopy(doc.fileId);
+      if (path) flash(`Exported to ${path}`);
+    } catch (err) {
+      showError(err);
+    }
   }
 
   /** Every loaded copy of a document: the main list and the shelf hold separate objects. */
@@ -433,7 +465,8 @@
     menu = {
       ...point,
       entries: [
-        { label: "Open with default app", icon: "external", disabled: unavailable, action: () => openDoc(doc) },
+        { label: "Open in Billy", icon: "book", disabled: unavailable, action: () => openDoc(doc) },
+        { label: "Open with default app", icon: "external", disabled: unavailable, action: () => openWithDefaultApp(doc) },
         { label: "Show in folder", icon: "folder-open", disabled: unavailable, action: () => api.showInFolder(doc.fileId).catch(showError) },
         ...(doc.missing
           ? ([{ label: "Clean up missing files…", icon: "alert", action: () => (showCleanUp = true) }] as MenuEntry[])
@@ -445,6 +478,13 @@
         doc.read
           ? { label: "Mark as unread", icon: "check-circle", action: () => setRead(doc, false) }
           : { label: "Mark as read", icon: "check-circle", action: () => setRead(doc, true) },
+        ...(doc.annotated
+          ? ([
+              "separator",
+              { label: "Export annotated copy…", icon: "external", action: () => exportSavedCopy(doc) },
+              { label: "Discard annotations…", icon: "x", action: () => discardAnnotations(doc) },
+            ] as MenuEntry[])
+          : []),
         "separator",
         { label: "Copy path", icon: "copy", action: () => copyText(doc.path) },
       ],
@@ -507,6 +547,7 @@
   }
 
   function onGlobalKeydown(event: KeyboardEvent) {
+    if (reading) return; // The reader handles its own keys.
     const target = event.target as HTMLElement;
     const typing = target.matches?.("input, select, textarea") ?? false;
     if (event.ctrlKey && event.key.toLowerCase() === "f") {
@@ -696,6 +737,25 @@
     onError={showError}
     {missingCount}
     onCleanUp={() => (showCleanUp = true)}
+  />
+{/if}
+
+{#if reading}
+  <Reader
+    doc={reading}
+    onClose={() => {
+      const fileId = reading?.fileId;
+      reading = null;
+      docsVersion++;
+      if (fileId !== undefined) selected = `d${fileId}`;
+      requestAnimationFrame(() => document.querySelector<HTMLElement>(".scroller")?.focus());
+    }}
+    onChanged={() => {
+      shelfVersion++;
+    }}
+    onToggleRead={(doc) => setRead(doc, !doc.read)}
+    onToggleFavorite={(doc) => setFavorite(doc, !doc.favorite)}
+    onError={showError}
   />
 {/if}
 

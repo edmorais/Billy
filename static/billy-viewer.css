@@ -1,0 +1,10 @@
+/* Billy's adjustments to the PDF.js viewer. Loaded into the viewer's iframe by Reader.svelte.
+   PDF.js's own Open and Download buttons don't apply in Billy: saving is Billy's job. */
+#secondaryOpenFile,
+#downloadButton,
+#secondaryDownload,
+#viewBookmark,
+#viewBookmarkSeparator,
+#viewsManagerAddFileButton {
+  display: none !important;
+}

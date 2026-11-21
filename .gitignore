@@ -47,5 +47,8 @@ src-tauri/resources/pdfium.dll
 src-tauri/resources/pdfium.version
 src-tauri/resources/pdfium-LICENSE.txt
 
+# PDF.js viewer, downloaded by scripts/fetch-pdfjs.ps1
+static/pdfjs/
+
 # Local Claude Code settings
 .claude/settings.local.json

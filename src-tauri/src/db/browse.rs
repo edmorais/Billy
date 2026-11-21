@@ -105,6 +105,8 @@ pub struct Document {
     pub missing: bool,
     /// The file's root folder is unavailable, for example an unplugged drive.
     pub offline: bool,
+    /// Billy has an annotated copy of this file.
+    pub annotated: bool,
 }
 
 /// Lists the documents of a library. With `folder_id`, only that folder, and with `recursive`
@@ -148,7 +150,8 @@ pub fn list_documents_with(
         "SELECT x.id, x.path, e.folder_id, x.size, x.mtime, e.date_added, x.page_count,
                 x.title, x.author, x.fingerprint,
                 COALESCE(rs.read, 0), fav.file_id IS NOT NULL, x.thumb_status,
-                x.missing_since IS NOT NULL, r.status = 'offline'
+                x.missing_since IS NOT NULL, r.status = 'offline',
+                EXISTS (SELECT 1 FROM annotations a WHERE a.file_id = x.id)
          FROM entries e
          JOIN files x ON x.id = e.file_id
          JOIN roots r ON r.id = e.root_id
@@ -180,6 +183,7 @@ pub fn list_documents_with(
             favorite: r.get(11)?,
             missing: r.get(13)?,
             offline: r.get(14)?,
+            annotated: r.get(15)?,
         })
     };
     let rows = match folder_id {

@@ -45,6 +45,31 @@ export interface Doc {
   missing: boolean;
   /** Its folder is unavailable, for example an unplugged drive. */
   offline: boolean;
+  /** Billy has an annotated copy of it. */
+  annotated: boolean;
+}
+
+export type PdfSource = "original" | "annotated";
+
+/**
+ * A document saved by the reader, ready to send to the backend: either the whole document
+ * (`mode: full`) or only what PDF.js appended to the open version (`mode: append`).
+ */
+export interface SavedPdf {
+  body: Uint8Array;
+  headers: Record<string, string>;
+}
+
+export interface OpenInfo {
+  fileId: number;
+  name: string;
+  path: string;
+  originalSize: number;
+  /** Size of the annotated copy, when there is one. */
+  annotatedSize: number | null;
+  /** The original changed after the annotated copy was made. */
+  originalChanged: boolean;
+  lastPage: number | null;
 }
 
 export interface MissingFile {
@@ -123,6 +148,18 @@ export const api = {
     favoritesOnly = false,
     includeMissing = false,
   ) => invoke<Doc[]>("list_documents", { libraryId, folderId, recursive, favoritesOnly, includeMissing }),
+  openDocument: (fileId: number) => invoke<OpenInfo>("open_document", { fileId }),
+  readPdf: (fileId: number, source: PdfSource, start: number, length: number) =>
+    invoke<ArrayBuffer>("read_pdf", { fileId, source, start, length }),
+  setLastPage: (fileId: number, page: number) => invoke<void>("set_last_page", { fileId, page }),
+  saveAnnotations: (fileId: number, saved: SavedPdf) =>
+    invoke<void>("save_annotations", saved.body, { headers: { ...saved.headers, "file-id": String(fileId) } }),
+  saveToOriginal: (fileId: number, saved: SavedPdf) =>
+    invoke<void>("save_to_original", saved.body, { headers: { ...saved.headers, "file-id": String(fileId) } }),
+  exportCopy: (fileId: number, saved: SavedPdf) =>
+    invoke<string | null>("export_copy", saved.body, { headers: { ...saved.headers, "file-id": String(fileId) } }),
+  exportSavedCopy: (fileId: number) => invoke<string | null>("export_saved_copy", { fileId }),
+  discardAnnotations: (fileId: number) => invoke<void>("discard_annotations", { fileId }),
   syncRoot: (rootId: number) => invoke<void>("sync_root", { rootId }),
   syncLibrary: (libraryId: number) => invoke<void>("sync_library", { libraryId }),
   setAutoSync: (rootId: number, on: boolean) => invoke<Root>("set_auto_sync", { rootId, on }),

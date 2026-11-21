@@ -6,6 +6,9 @@ use crate::db::missing::{self, MissingFile};
 use crate::db::{self, libraries, marks};
 use crate::error::{Error, Result};
 use crate::fs_guard;
+use crate::reader::{self, OpenInfo, Payload, Source};
+use tauri::ipc::{InvokeBody, Request, Response};
+use tauri_plugin_dialog::DialogExt;
 use crate::scan::{self, ScanReport};
 use crate::state::AppState;
 use serde::Serialize;
@@ -62,6 +65,128 @@ pub fn list_documents(
     include_missing: bool,
 ) -> Result<Vec<Document>> {
     browse::list_documents_with(&state.db(), library_id, folder_id, recursive, favorites_only, include_missing)
+}
+
+/// Everything the reader needs before opening a document.
+#[tauri::command]
+pub fn open_document(state: State<AppState>, file_id: i64) -> Result<OpenInfo> {
+    let conn = state.db();
+    let info = reader::open_info(&conn, file_id)?;
+    // Mark when it was last opened, keeping the last page.
+    reader::set_last_page(&conn, file_id, info.last_page.unwrap_or(1))?;
+    Ok(info)
+}
+
+/// A slice of a document's bytes, sent as raw binary.
+#[tauri::command]
+pub fn read_pdf(state: State<AppState>, file_id: i64, source: String, start: u64, length: u64) -> Result<Response> {
+    let bytes = reader::read_range(&state.db(), file_id, Source::parse(&source)?, start, length)?;
+    Ok(Response::new(bytes))
+}
+
+#[tauri::command]
+pub fn set_last_page(state: State<AppState>, file_id: i64, page: i64) -> Result<()> {
+    reader::set_last_page(&state.db(), file_id, page)
+}
+
+fn raw_body<'a>(request: &'a Request<'_>) -> Result<&'a [u8]> {
+    match request.body() {
+        InvokeBody::Raw(bytes) => Ok(bytes),
+        _ => Err(Error::msg("expected the document's bytes")),
+    }
+}
+
+fn header<'a>(request: &'a Request<'_>, name: &str) -> Result<&'a str> {
+    request
+        .headers()
+        .get(name)
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| Error::msg(format!("missing {name}")))
+}
+
+fn file_id_header(request: &Request<'_>) -> Result<i64> {
+    header(request, "file-id")?.parse().map_err(|_| Error::msg("bad file-id"))
+}
+
+/// Reads a saved document from the request: either the whole document, or (header
+/// `mode: append`) the bytes PDF.js appended to the version that was open.
+fn payload(request: &Request<'_>) -> Result<Payload> {
+    let body = raw_body(request)?;
+    if header(request, "mode").unwrap_or("full") != "append" {
+        return Ok(Payload::Full(body.to_vec()));
+    }
+    let number = |name: &str| -> Result<u64> {
+        header(request, name)?.parse().map_err(|_| Error::msg(format!("bad {name}")))
+    };
+    let probe_len = number("probe-length")? as usize;
+    if probe_len > body.len() {
+        return Err(Error::msg("bad probe-length"));
+    }
+    Ok(Payload::Append {
+        source: Source::parse(header(request, "source")?)?,
+        base_len: number("base-length")?,
+        probe: body[..probe_len].to_vec(),
+        tail: body[probe_len..].to_vec(),
+    })
+}
+
+/// Saves the document as its annotated copy in Billy's data folder.
+#[tauri::command]
+pub fn save_annotations(state: State<AppState>, request: Request<'_>) -> Result<()> {
+    let file_id = file_id_header(&request)?;
+    let from_original = header(&request, "source")? == "original";
+    reader::save_annotated(&state.db(), &state.data_dir(), file_id, &payload(&request)?, from_original)
+}
+
+/// Writes the document into the original file. The UI asks the user to confirm first.
+#[tauri::command]
+pub fn save_to_original(state: State<AppState>, request: Request<'_>) -> Result<()> {
+    let file_id = file_id_header(&request)?;
+    reader::save_to_original(&state.db(), &state.data_dir(), file_id, &payload(&request)?)?;
+    state.thumbs.wake();
+    Ok(())
+}
+
+/// Asks where to save an annotated copy, then writes it there. Returns the chosen path, or
+/// nothing if the user cancelled. The path comes from the Windows save dialog, never the UI.
+#[tauri::command]
+pub async fn export_copy(app: AppHandle, request: Request<'_>) -> Result<Option<String>> {
+    let file_id = file_id_header(&request)?;
+    let payload = payload(&request)?;
+    export_payload(&app, file_id, payload)
+}
+
+/// Exports the saved annotated copy of a document, from the library's right-click menu.
+#[tauri::command]
+pub async fn export_saved_copy(app: AppHandle, file_id: i64) -> Result<Option<String>> {
+    let size = reader::open_info(&app.state::<AppState>().db(), file_id)?
+        .annotated_size
+        .ok_or_else(|| Error::msg("This document has no annotated copy."))?;
+    // The whole copy, streamed from disk.
+    let payload = Payload::Append { source: Source::Annotated, base_len: size as u64, probe: Vec::new(), tail: Vec::new() };
+    export_payload(&app, file_id, payload)
+}
+
+fn export_payload(app: &AppHandle, file_id: i64, payload: Payload) -> Result<Option<String>> {
+    let original = marks::file_path(&app.state::<AppState>().db(), file_id)?;
+    let stem = original.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "document".into());
+    let picked = app
+        .dialog()
+        .file()
+        .set_title("Export annotated copy")
+        .set_file_name(format!("{stem} (annotated).pdf"))
+        .add_filter("PDF document", &["pdf"])
+        .blocking_save_file();
+    let Some(picked) = picked else { return Ok(None) };
+    let path = picked.into_path().map_err(|e| Error::msg(e.to_string()))?;
+    reader::export(&app.state::<AppState>().db(), file_id, &payload, &path)?;
+    Ok(Some(path.to_string_lossy().to_string()))
+}
+
+/// Deletes a document's annotated copy from Billy's data folder.
+#[tauri::command]
+pub fn discard_annotations(state: State<AppState>, file_id: i64) -> Result<()> {
+    reader::discard_annotated(&state.db(), &state.data_dir(), file_id)
 }
 
 /// Syncs one root folder now, in the background.
