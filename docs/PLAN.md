@@ -23,7 +23,7 @@ Out of scope for the first version: full-text search inside PDFs, tags, ratings,
 | Topic | Decision |
 |---|---|
 | App shell | Tauri 2: a native Windows app with a Rust backend and a web UI shown in WebView2. No web server. |
-| UI framework | Svelte 5 with TypeScript, built with Vite. |
+| UI framework | Svelte 5 with TypeScript, built with Vite. SvelteKit in single-page mode (static adapter, no server), as Tauri recommends. |
 | PDF reader | Mozilla PDF.js, the reader inside Firefox, including its annotation editor. |
 | Thumbnails and PDF metadata | PDFium, the PDF engine inside Chrome, called from Rust through the `pdfium-render` crate. |
 | Database | SQLite, through the `rusqlite` crate. |
@@ -80,7 +80,7 @@ annotations      file_id, copy_path, source_fingerprint, updated_at
 ```
 
 - **`files` holds one record for each PDF on disk.** The same path in two libraries shares that record, its thumbnail and its annotated copy. Membership in a library and the date added are stored in `entries`.
-- **The fingerprint is the file size plus an xxHash3 hash of the first and last 1 MB of the file.** It is quick to compute, even for 5,000 books, and it lets sync recognize a file that was moved or renamed.
+- **The fingerprint is the file size plus an xxHash3 hash of the first and last 64 KB of the file.** It is quick to compute, even for 5,000 books, and it lets sync recognize a file that was moved or renamed.
 - **Favorites and read status belong to a library.** A book can be read in one library and unread in another. The last page you viewed belongs to the file and is the same in every library.
 
 ## 5. Features in detail
