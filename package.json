@@ -1,6 +1,6 @@
 {
   "name": "billy",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Browse and read the PDFs in your folders",
   "private": true,
   "type": "module",

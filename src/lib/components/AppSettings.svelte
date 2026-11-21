@@ -17,6 +17,7 @@
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { checkForUpdates, installUpdate, setAutoUpdates, updates } from "$lib/updates.svelte";
   import { formatDate } from "$lib/view";
+  import { display, setTextSize, textSizes } from "$lib/display.svelte";
 
   let {
     version,
@@ -83,6 +84,23 @@
       {/each}
     </div>
     <p class="hint">Pages in the reader keep their own colors in every mode.</p>
+  </section>
+
+  <section>
+    <h3>Text size</h3>
+    <div class="segmented" role="radiogroup" aria-label="Text size">
+      {#each textSizes as size (size.value)}
+        <button
+          role="radio"
+          aria-checked={display.textSize === size.value}
+          class:on={display.textSize === size.value}
+          onclick={() => setTextSize(size.value)}
+        >
+          {size.label}
+        </button>
+      {/each}
+    </div>
+    <p class="hint">Makes everything in Billy larger or smaller, including the reader's toolbar.</p>
   </section>
 
   <section>

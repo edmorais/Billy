@@ -5,10 +5,12 @@
 export const ssr = false;
 
 import { applyCachedTheme } from "$lib/theme.svelte";
+import { applyCachedDisplay } from "$lib/display.svelte";
 
 export async function load() {
-  // The last used theme, before anything is drawn.
+  // The last used theme, text size and sidebar width, before anything is drawn.
   applyCachedTheme();
+  applyCachedDisplay();
   // In a plain browser during development, use a fake backend so the UI can be worked on.
   // Release builds drop this code, because import.meta.env.DEV is false there.
   if (import.meta.env.DEV && !("__TAURI_INTERNALS__" in window)) {

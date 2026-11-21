@@ -17,6 +17,38 @@
   import AppSettings from "$lib/components/AppSettings.svelte";
   import { applyTheme, readThemeSettings } from "$lib/theme.svelte";
   import { initUpdates, installUpdate, updates } from "$lib/updates.svelte";
+  import { display, initDisplay, setSidebarWidth, SIDEBAR_DEFAULT } from "$lib/display.svelte";
+
+  // Dragging the edge between the sidebar and the main area.
+  let resizing = $state(false);
+  function startResize(event: PointerEvent) {
+    const handle = event.currentTarget as HTMLElement;
+    const startX = event.clientX;
+    const startWidth = display.sidebarWidth;
+    handle.setPointerCapture(event.pointerId);
+    resizing = true;
+    const move = (e: PointerEvent) => setSidebarWidth(startWidth + e.clientX - startX, false);
+    const end = () => {
+      resizing = false;
+      setSidebarWidth(display.sidebarWidth);
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", end);
+      handle.removeEventListener("pointercancel", end);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", end);
+    handle.addEventListener("pointercancel", end);
+    event.preventDefault();
+  }
+
+  function resizeWithKeys(event: KeyboardEvent) {
+    const step = event.shiftKey ? 48 : 16;
+    if (event.key === "ArrowLeft") setSidebarWidth(display.sidebarWidth - step);
+    else if (event.key === "ArrowRight") setSidebarWidth(display.sidebarWidth + step);
+    else if (event.key === "Home") setSidebarWidth(SIDEBAR_DEFAULT);
+    else return;
+    event.preventDefault();
+  }
   import { ask } from "@tauri-apps/plugin-dialog";
   import {
     collator,
@@ -584,6 +616,7 @@
     api.getSettings().then((s) => {
       applyTheme(readThemeSettings(s.theme as Record<string, unknown>));
       initUpdates(s.updates as Record<string, unknown> | undefined);
+      initDisplay(s.display as Record<string, unknown> | undefined);
     }, showError);
     for (const id of await api.scanningRoots().catch(() => [])) scanning[id] = 0;
     unlisten.push(
@@ -638,7 +671,24 @@
   />
 {/if}
 
-<div class="app">
+<div class="app" class:resizing>
+  <!-- A focusable separator with a value is the ARIA pattern for a resizable splitter, so it
+       may take focus and keys, although the checker counts separators as non-interactive. -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+  <div
+    class="resizer"
+    role="separator"
+    aria-orientation="vertical"
+    aria-label="Sidebar width"
+    aria-valuenow={display.sidebarWidth}
+    aria-valuemin={200}
+    aria-valuemax={520}
+    tabindex="0"
+    title="Drag to resize. Double-click to reset."
+    onpointerdown={startResize}
+    ondblclick={() => setSidebarWidth(SIDEBAR_DEFAULT)}
+    onkeydown={resizeWithKeys}
+  ></div>
   <Sidebar
     {libraries}
     {libraryId}
@@ -815,9 +865,34 @@
 
 <style>
   .app {
+    position: relative;
     display: grid;
-    grid-template-columns: 260px 1fr;
+    grid-template-columns: var(--sidebar-w, 260px) 1fr;
     height: 100vh;
+  }
+
+  /* The draggable edge between the sidebar and the main area. */
+  .resizer {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: calc(var(--sidebar-w, 260px) - 3px);
+    z-index: 5;
+    width: 7px;
+    cursor: col-resize;
+    touch-action: none;
+  }
+
+  .resizer:hover,
+  .resizer:focus-visible,
+  .app.resizing .resizer {
+    background: color-mix(in srgb, var(--accent) 45%, transparent);
+    outline: none;
+  }
+
+  .app.resizing {
+    cursor: col-resize;
+    user-select: none;
   }
 
   main {

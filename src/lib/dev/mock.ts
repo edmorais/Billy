@@ -150,7 +150,11 @@ export function installMock() {
       const a = args as Record<string, any>;
       switch (cmd) {
         case "app_version":
-          return "0.9.0 (mock)";
+          return "0.9.1 (mock)";
+        case "plugin:webview|set_webview_zoom":
+          // The real app zooms the whole window; in a browser, CSS zoom stands in.
+          document.documentElement.style.setProperty("zoom", String(a.value ?? a.scaleFactor ?? 1));
+          return null;
         case "plugin:updater|check":
           // With ?update, pretend a newer version exists.
           return new URLSearchParams(location.search).has("update")
