@@ -64,10 +64,6 @@
 </script>
 
 <aside>
-  <div class="brand">
-    <img class="mark" src="/billy-mark.svg" alt="" width="22" height="28" draggable="false" />
-    <span class="display">Billy</span>
-  </div>
 
   <div class="section-head">
     <h2>Libraries</h2>
@@ -162,25 +158,6 @@
     padding: 12px 8px;
     background: var(--panel);
     border-right: 1px solid var(--line);
-  }
-
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 8px 12px;
-    font-size: 17px;
-    font-weight: 600;
-    color: var(--accent);
-  }
-
-  .brand span {
-    color: var(--fg);
-  }
-
-  .mark {
-    display: block;
-    flex: none;
   }
 
   .section-head {

@@ -487,9 +487,10 @@
 {/if}
 
 <style>
+  /* Below Billy's title bar, which stays in view while reading. */
   .reader {
     position: fixed;
-    inset: 0;
+    inset: var(--titlebar-h) 0 0 0;
     z-index: 20;
     display: flex;
     flex-direction: column;

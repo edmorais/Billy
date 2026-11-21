@@ -1,7 +1,7 @@
 // Fake backend for working on the UI in a normal browser (`npm run dev`, then open
 // http://localhost:1420). It is only loaded in development, outside Tauri.
 
-import { mockIPC } from "@tauri-apps/api/mocks";
+import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import type { Doc, FolderNode, Library, Root } from "$lib/api";
 
 const words =
@@ -121,6 +121,7 @@ const samplePdf = makeSamplePdf();
 const appSettings: Record<string, unknown> = {};
 
 export function installMock() {
+  mockWindows("main");
   const { folders, docs } = build();
   const library: Library = {
     id: 1,

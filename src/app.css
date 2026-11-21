@@ -1,6 +1,8 @@
 /* Design tokens. The values below are the defaults (Oak, System fonts); the chosen color and
    type themes replace them at startup (see src/lib/theme.svelte.ts). */
 :root {
+  /* Height of Billy's own title bar. */
+  --titlebar-h: 36px;
   --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
   --bg: #f6f4ef;
   --panel: #ece8df;

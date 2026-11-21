@@ -15,6 +15,7 @@
   import CleanUpDialog from "$lib/components/CleanUpDialog.svelte";
   import Reader from "$lib/components/Reader.svelte";
   import AppSettings from "$lib/components/AppSettings.svelte";
+  import TitleBar from "$lib/components/TitleBar.svelte";
   import { applyTheme, readThemeSettings } from "$lib/theme.svelte";
   import { initUpdates, installUpdate, updates } from "$lib/updates.svelte";
   import { display, initDisplay, setSidebarWidth, SIDEBAR_DEFAULT } from "$lib/display.svelte";
@@ -671,6 +672,8 @@
   />
 {/if}
 
+<TitleBar reading={reading !== null} />
+
 <div class="app" class:resizing>
   <!-- A focusable separator with a value is the ARIA pattern for a resizable splitter, so it
        may take focus and keys, although the checker counts separators as non-interactive. -->
@@ -868,7 +871,7 @@
     position: relative;
     display: grid;
     grid-template-columns: var(--sidebar-w, 260px) 1fr;
-    height: 100vh;
+    height: calc(100vh - var(--titlebar-h));
   }
 
   /* The draggable edge between the sidebar and the main area. */
