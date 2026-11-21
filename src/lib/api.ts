@@ -1,6 +1,6 @@
 // Typed wrappers around the Rust backend's commands and events.
 
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export interface Library {
@@ -38,8 +38,27 @@ export interface Doc {
   title: string | null;
   author: string | null;
   fingerprint: string;
+  thumbStatus: "pending" | "ok" | "error";
   read: boolean;
   favorite: boolean;
+}
+
+export interface ThumbUpdate {
+  fileId: number;
+  status: "ok" | "error";
+  pages: number | null;
+  title: string | null;
+  author: string | null;
+}
+
+export interface ThumbsUpdated {
+  updates: ThumbUpdate[];
+  remaining: number;
+}
+
+/** URL of a cached thumbnail, served by the backend's thumb:// protocol. */
+export function thumbUrl(fingerprint: string): string {
+  return convertFileSrc(fingerprint, "thumb");
 }
 
 export interface Root {
@@ -87,7 +106,17 @@ export const api = {
   scanningRoots: () => invoke<number[]>("scanning_roots"),
   addRoot: (libraryId: number, path: string) => invoke<Root>("add_root", { libraryId, path }),
   removeRoot: (rootId: number, purge: boolean) => invoke<void>("remove_root", { rootId, purge }),
+  prioritizeThumbs: (fileIds: number[]) => invoke<void>("prioritize_thumbs", { fileIds }),
+  thumbsRemaining: () => invoke<number>("thumbs_remaining"),
 };
+
+export function onThumbsUpdated(handler: (u: ThumbsUpdated) => void): Promise<UnlistenFn> {
+  return listen<ThumbsUpdated>("thumbs-updated", (e) => handler(e.payload));
+}
+
+export function onThumbsError(handler: (message: string) => void): Promise<UnlistenFn> {
+  return listen<string>("thumbs-error", (e) => handler(e.payload));
+}
 
 export function onScanProgress(handler: (p: ScanProgress) => void): Promise<UnlistenFn> {
   return listen<ScanProgress>("scan-progress", (e) => handler(e.payload));

@@ -30,6 +30,9 @@ dunce = "1.0.5"
 thiserror = "2.0.21"
 xxhash-rust = { version = "0.8.21", features = ["xxh3"] }
 tauri-plugin-dialog = "2.8.4"
+# Pinned to the PDFium API version of the DLL that scripts/fetch-pdfium.ps1 downloads.
+pdfium-render = { version = "=0.9.6", default-features = false, features = ["pdfium_8125", "thread_safe", "image_025", "image_api"] }
+image = { version = "0.25.10", default-features = false, features = ["jpeg"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

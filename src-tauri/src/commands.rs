@@ -62,6 +62,18 @@ pub fn list_roots(state: State<AppState>, library_id: i64) -> Result<Vec<Root>> 
     libraries::list_roots(&state.db(), library_id)
 }
 
+/// Makes these documents' thumbnails next, for example because they are on screen.
+#[tauri::command]
+pub fn prioritize_thumbs(state: State<AppState>, file_ids: Vec<i64>) {
+    state.thumbs.prioritize(&file_ids);
+}
+
+/// Number of documents still waiting for a thumbnail.
+#[tauri::command]
+pub fn thumbs_remaining(state: State<AppState>) -> Result<i64> {
+    crate::thumbs::remaining(&state.db())
+}
+
 /// Returns the ids of roots that are being scanned right now.
 #[tauri::command]
 pub fn scanning_roots(state: State<AppState>) -> Vec<i64> {
@@ -120,9 +132,13 @@ pub fn spawn_scan(app: AppHandle, root_id: i64) {
         let result = db::open(&db_path).and_then(|mut conn| {
             scan::scan_root(&mut conn, root_id, &mut |p| {
                 let _ = app.emit("scan-progress", p);
+                // Start on thumbnails for the files found so far.
+                app.state::<AppState>().thumbs.wake();
             })
         });
-        app.state::<AppState>().scanning.lock().unwrap().remove(&root_id);
+        let state = app.state::<AppState>();
+        state.scanning.lock().unwrap().remove(&root_id);
+        state.thumbs.wake();
         let payload = match result {
             Ok(report) => ScanFinished { root_id, report: Some(report), error: None },
             Err(err) => ScanFinished { root_id, report: None, error: Some(err.to_string()) },

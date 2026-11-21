@@ -97,6 +97,8 @@ pub struct Document {
     pub title: Option<String>,
     pub author: Option<String>,
     pub fingerprint: String,
+    /// pending | ok | error
+    pub thumb_status: String,
     pub read: bool,
     pub favorite: bool,
 }
@@ -125,7 +127,7 @@ pub fn list_documents(
     let sql = format!(
         "SELECT x.id, x.path, e.folder_id, x.size, x.mtime, e.date_added, x.page_count,
                 x.title, x.author, x.fingerprint,
-                COALESCE(rs.read, 0), fav.file_id IS NOT NULL
+                COALESCE(rs.read, 0), fav.file_id IS NOT NULL, x.thumb_status
          FROM entries e
          JOIN files x ON x.id = e.file_id
          LEFT JOIN read_state rs ON rs.library_id = e.library_id AND rs.file_id = e.file_id
@@ -151,6 +153,7 @@ pub fn list_documents(
             title: r.get(7)?,
             author: r.get(8)?,
             fingerprint: r.get(9)?,
+            thumb_status: r.get(12)?,
             read: r.get(10)?,
             favorite: r.get(11)?,
         })

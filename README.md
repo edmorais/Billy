@@ -13,10 +13,14 @@ Requirements:
 - Visual Studio 2022 Build Tools with the "Desktop development with C++" workload
 - WebView2 Runtime (included in Windows 11)
 
-Install the dependencies:
+Install the dependencies, and download the pinned PDFium library that Billy uses for thumbnails:
 
 ```powershell
 npm install
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\fetch-pdfium.ps1
 ```
 
 Run the app in development mode. This starts a local Vite dev server for hot reload. Release builds do not use a server.

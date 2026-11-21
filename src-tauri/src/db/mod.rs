@@ -11,7 +11,10 @@ use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Schema migrations, applied in order. The database's `user_version` records how many have run.
-const MIGRATIONS: &[&str] = &[include_str!("migrations/001_initial.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("migrations/001_initial.sql"),
+    include_str!("migrations/002_thumb_index.sql"),
+];
 
 /// Opens (or creates) the database at `path` and brings its schema up to date.
 pub fn open(path: &Path) -> Result<Connection> {

@@ -4,20 +4,54 @@ pub mod error;
 pub mod fs_guard;
 pub mod scan;
 pub mod state;
+pub mod thumbs;
 
+use serde::Serialize;
 use state::AppState;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ThumbsUpdated<'a> {
+    updates: &'a [thumbs::ThumbUpdate],
+    remaining: i64,
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // Serves cached thumbnails to the UI at http://thumb.localhost/<fingerprint>.
+        .register_asynchronous_uri_scheme_protocol("thumb", |ctx, request, responder| {
+            let thumbs_dir = ctx.app_handle().state::<AppState>().thumbs_dir.clone();
+            let path = request.uri().path().to_string();
+            std::thread::spawn(move || responder.respond(thumbs::serve(&thumbs_dir, &path)));
+        })
         .setup(|app| {
-            // Billy's data lives in %APPDATA%\Billy, never in a library folder.
+            // Billy's data lives in %APPDATA%\Billy and its cache in %LOCALAPPDATA%\Billy,
+            // never in a library folder.
             let db_path = app.path().data_dir()?.join("Billy").join("billy.db");
+            let thumbs_dir = app.path().local_data_dir()?.join("Billy").join("thumbs");
             let conn = db::open(&db_path)?;
-            app.manage(AppState::new(conn, db_path));
+            let state = AppState::new(conn, db_path.clone(), thumbs_dir.clone());
+            let queue = state.thumbs.clone();
+            app.manage(state);
+
+            let handle = app.handle().clone();
+            let error_handle = app.handle().clone();
+            thumbs::spawn_worker(
+                queue,
+                db_path,
+                thumbs_dir,
+                app.path().resource_dir()?,
+                move |updates, remaining| {
+                    let _ = handle.emit("thumbs-updated", ThumbsUpdated { updates, remaining });
+                },
+                move |message| {
+                    let _ = error_handle.emit("thumbs-error", message);
+                },
+            );
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -33,6 +67,8 @@ pub fn run() {
             commands::scanning_roots,
             commands::add_root,
             commands::remove_root,
+            commands::prioritize_thumbs,
+            commands::thumbs_remaining,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Billy");

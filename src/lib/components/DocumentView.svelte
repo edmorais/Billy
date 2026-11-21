@@ -29,9 +29,11 @@
     onSelect: (key: string) => void;
     onOpen: (item: Item) => void;
     onSort: (field: SortField) => void;
+    /** Called with the documents on screen that still need a thumbnail. */
+    onVisible: (fileIds: number[]) => void;
   }
 
-  let { mode, groups, selected, sort, desc, emptyMessage, onSelect, onOpen, onSort }: Props = $props();
+  let { mode, groups, selected, sort, desc, emptyMessage, onSelect, onOpen, onSort, onVisible }: Props = $props();
 
   type Row =
     | { kind: "header"; label: string; count: number; top: number; height: number }
@@ -102,6 +104,18 @@
     const out: Row[] = [];
     for (let i = lo; i < rows.length && rows[i].top < to; i++) out.push(rows[i]);
     return out;
+  });
+
+  // Ask for thumbnails of what is on screen first.
+  $effect(() => {
+    const ids: number[] = [];
+    for (const row of visible) {
+      if (row.kind !== "items") continue;
+      for (const item of row.items) {
+        if (item.kind === "doc" && item.doc.thumbStatus === "pending") ids.push(item.doc.fileId);
+      }
+    }
+    if (ids.length) onVisible(ids);
   });
 
   /** Where each item sits, for keyboard navigation. */
@@ -409,6 +423,7 @@
   .cover-box {
     display: flex;
     align-items: flex-end;
+    justify-content: center;
     width: var(--cover-w);
     height: calc(var(--cover-w) * 1.42);
   }
@@ -530,6 +545,9 @@
   }
 
   .mini {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     flex: none;
     width: 30px;
     height: 42px;

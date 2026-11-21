@@ -1,7 +1,16 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import type { UnlistenFn } from "@tauri-apps/api/event";
-  import { api, onScanFinished, onScanProgress, type Doc, type FolderNode, type Library } from "$lib/api";
+  import {
+    api,
+    onScanFinished,
+    onScanProgress,
+    onThumbsError,
+    onThumbsUpdated,
+    type Doc,
+    type FolderNode,
+    type Library,
+  } from "$lib/api";
   import { collator, fold, readSettings, sortDocs, defaultSettings, type SortField, type ViewSettings } from "$lib/view";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import Toolbar from "$lib/components/Toolbar.svelte";
@@ -26,6 +35,38 @@
   let docsVersion = $state(0);
   let searchInput = $state<HTMLInputElement>();
   let firstName = $state("");
+  let thumbsLeft = $state(0);
+
+  // Ask the backend to render what is on screen first. Debounced, so fast scrolling only
+  // sends the place where it stops.
+  let visibleTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastVisible = "";
+  function requestThumbs(fileIds: number[]) {
+    clearTimeout(visibleTimer);
+    visibleTimer = setTimeout(() => {
+      const key = fileIds.join(",");
+      if (key === lastVisible) return;
+      lastVisible = key;
+      api.prioritizeThumbs(fileIds).catch(() => {});
+    }, 150);
+  }
+
+  function applyThumbUpdates(updates: { fileId: number; status: "ok" | "error"; pages: number | null; title: string | null; author: string | null }[]) {
+    if (updates.length === 0 || docs.length === 0) return;
+    const index = new Map(docs.map((d, i) => [d.fileId, i]));
+    for (const u of updates) {
+      const i = index.get(u.fileId);
+      if (i === undefined) continue;
+      const doc = docs[i];
+      doc.thumbStatus = u.status;
+      if (u.status === "ok") {
+        doc.pages = u.pages;
+        doc.title = u.title;
+        doc.author = u.author;
+      }
+    }
+    lastVisible = "";
+  }
 
   let library = $derived(libraries.find((l) => l.id === libraryId) ?? null);
   let folderById = $derived(new Map(folders.map((f) => [f.id, f])));
@@ -278,13 +319,20 @@
         }
         refreshAll();
       }),
+      await onThumbsUpdated(({ updates, remaining }) => {
+        thumbsLeft = remaining;
+        applyThumbUpdates(updates);
+      }),
+      await onThumbsError((message) => showError(`Thumbnails are unavailable: ${message}`)),
     );
+    api.thumbsRemaining().then((n) => (thumbsLeft = n), () => {});
     await loadLibraries();
   });
 
   onDestroy(() => {
     unlisten.forEach((fn) => fn());
     clearTimeout(saveTimer);
+    clearTimeout(visibleTimer);
   });
 </script>
 
@@ -326,6 +374,7 @@
         onSelect={(key) => (selected = key)}
         onOpen={openItem}
         onSort={sortBy}
+        onVisible={requestThumbs}
       />
     {:else}
       <div class="welcome">
@@ -359,6 +408,9 @@
       <span class="spacer"></span>
       {#if scanCount}
         <span class="muted">Scanning… {Object.values(scanning).reduce((a, b) => a + b, 0)} PDFs found</span>
+      {/if}
+      {#if thumbsLeft > 0}
+        <span class="muted">Making covers… {thumbsLeft} left</span>
       {/if}
     </footer>
   </main>

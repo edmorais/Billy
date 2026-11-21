@@ -20,7 +20,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
+      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' data: blob: thumb: http://thumb.localhost; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
     }
   },
   "bundle": {
@@ -36,6 +36,10 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": {
+      "resources/pdfium.dll": "pdfium.dll",
+      "resources/pdfium-LICENSE.txt": "licenses/pdfium-LICENSE.txt"
+    },
     "windows": {
       "nsis": {
         "installMode": "currentUser"

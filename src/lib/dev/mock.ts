@@ -47,6 +47,7 @@ function build() {
         title: hasMeta ? title : null,
         author: hasMeta ? pick(authors) : null,
         fingerprint: `f${fileId}`,
+        thumbStatus: "pending",
         read: rand() < 0.3,
         favorite: false,
       });
@@ -124,6 +125,10 @@ export function installMock() {
           return roots;
         case "scanning_roots":
           return [];
+        case "prioritize_thumbs":
+          return null;
+        case "thumbs_remaining":
+          return 0;
         default:
           console.warn("mock: unhandled command", cmd, args);
           return null;

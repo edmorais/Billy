@@ -152,9 +152,9 @@ annotations      file_id, copy_path, source_fingerprint, updated_at
 
 ### 5.6 Thumbnails and metadata
 
-- **The thumbnail is page 1**, rendered by PDFium at about 400 px wide and saved as WebP. Cache files are named by fingerprint, so the cache stays valid after a file moves.
+- **The thumbnail is page 1**, rendered by PDFium at 400 px wide and saved as JPEG (quality 82, about 65 KB each). The image crate only writes lossless WebP, which would be several times larger. Cache files are named by fingerprint, so the cache stays valid after a file moves.
 - **Each file is rendered once by a background worker.** The same pass reads the page count, title and author. Files visible on screen go first.
-- **Progress is shown in a status bar.** The first full pass over 5,000 books should take a few minutes.
+- **Progress is shown in a status bar.** Measured on real books: about 4 covers a second, limited by disk reads, so a first pass over 5,000 books takes about 20 minutes in the background. PDFium serializes all calls, so more threads would not help; separate worker processes could, if this ever matters.
 - **Encrypted or broken PDFs** get a placeholder image and an error mark. The scan continues.
 
 ### 5.7 Reader

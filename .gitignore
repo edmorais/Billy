@@ -42,5 +42,10 @@ vite.config.ts.timestamp-*
 src-tauri/target/
 src-tauri/gen/schemas/
 
+# PDFium binary, downloaded by scripts/fetch-pdfium.ps1
+src-tauri/resources/pdfium.dll
+src-tauri/resources/pdfium.version
+src-tauri/resources/pdfium-LICENSE.txt
+
 # Local Claude Code settings
 .claude/settings.local.json
