@@ -136,6 +136,8 @@ export interface ScanFinished {
 
 export const api = {
   appVersion: () => invoke<string>("app_version"),
+  getSettings: () => invoke<Record<string, unknown>>("get_settings"),
+  setSetting: (key: string, value: unknown) => invoke<void>("set_setting", { key, value }),
   listLibraries: () => invoke<Library[]>("list_libraries"),
   createLibrary: (name: string) => invoke<Library>("create_library", { name }),
   renameLibrary: (id: number, name: string) => invoke<Library>("rename_library", { id, name }),

@@ -61,6 +61,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::app_version,
+            commands::get_settings,
+            commands::set_setting,
             commands::list_libraries,
             commands::create_library,
             commands::rename_library,

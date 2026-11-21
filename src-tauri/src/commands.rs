@@ -21,6 +21,17 @@ pub fn app_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+/// App-wide settings, such as the theme, as one JSON object.
+#[tauri::command]
+pub fn get_settings(state: State<AppState>) -> Result<serde_json::Value> {
+    db::settings::get_all(&state.db())
+}
+
+#[tauri::command]
+pub fn set_setting(state: State<AppState>, key: String, value: serde_json::Value) -> Result<()> {
+    db::settings::set(&state.db(), &key, &value)
+}
+
 #[tauri::command]
 pub fn list_libraries(state: State<AppState>) -> Result<Vec<Library>> {
     libraries::list_libraries(&state.db())

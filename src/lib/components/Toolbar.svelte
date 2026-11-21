@@ -196,6 +196,7 @@
   }
 
   .crumb.current {
+    font-family: var(--font-display);
     flex-shrink: 0;
     max-width: 50%;
     color: var(--fg);

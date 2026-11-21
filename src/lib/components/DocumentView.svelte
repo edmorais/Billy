@@ -396,6 +396,7 @@
   }
 
   .group-label {
+    font-family: var(--font-display);
     color: var(--fg);
     font-weight: 600;
   }
@@ -532,6 +533,7 @@
   }
 
   .caption .name {
+    font-family: var(--font-display);
     display: -webkit-box;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;

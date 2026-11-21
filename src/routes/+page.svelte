@@ -14,6 +14,8 @@
   } from "$lib/api";
   import CleanUpDialog from "$lib/components/CleanUpDialog.svelte";
   import Reader from "$lib/components/Reader.svelte";
+  import AppSettings from "$lib/components/AppSettings.svelte";
+  import { applyTheme, readThemeSettings } from "$lib/theme.svelte";
   import { ask } from "@tauri-apps/plugin-dialog";
   import {
     collator,
@@ -369,6 +371,7 @@
 
   /** The document open in the reader, if any. The library stays underneath, as it was. */
   let reading = $state<Doc | null>(null);
+  let showAppSettings = $state(false);
 
   function openDoc(doc: Doc) {
     if (doc.missing) return flash("This file is no longer on disk.");
@@ -567,7 +570,7 @@
       event.preventDefault();
       searchInput?.focus();
       searchInput?.select();
-    } else if (event.key === "Backspace" && !typing && !showSettings && !showCleanUp && !menu) {
+    } else if (event.key === "Backspace" && !typing && !showSettings && !showCleanUp && !showAppSettings && !menu) {
       event.preventDefault();
       goUp();
     }
@@ -577,6 +580,7 @@
 
   onMount(async () => {
     api.appVersion().then((v) => (version = v), showError);
+    api.getSettings().then((s) => applyTheme(readThemeSettings(s.theme as Record<string, unknown>)), showError);
     for (const id of await api.scanningRoots().catch(() => [])) scanning[id] = 0;
     unlisten.push(
       await onScanProgress((p) => {
@@ -645,6 +649,7 @@
     onOpenSettings={() => (showSettings = true)}
     onFolderMenu={(e, node) => openMenu({ x: e.clientX, y: e.clientY }, { key: `f${node.id}`, kind: "folder", folder: node })}
     onLibraryMenu={openLibraryMenu}
+    onOpenAppSettings={() => (showAppSettings = true)}
   />
 
   <main>
@@ -751,6 +756,10 @@
     {missingCount}
     onCleanUp={() => (showCleanUp = true)}
   />
+{/if}
+
+{#if showAppSettings}
+  <AppSettings onClose={() => (showAppSettings = false)} onError={showError} />
 {/if}
 
 {#if reading}

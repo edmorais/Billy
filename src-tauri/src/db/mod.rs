@@ -6,6 +6,7 @@ pub mod browse;
 pub mod libraries;
 pub mod marks;
 pub mod missing;
+pub mod settings;
 
 use crate::error::Result;
 use rusqlite::Connection;

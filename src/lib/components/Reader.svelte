@@ -8,6 +8,7 @@
   import { ask } from "@tauri-apps/plugin-dialog";
   import { api, type Doc, type OpenInfo, type PdfSource, type SavedPdf } from "$lib/api";
   import { displayName, formatSize } from "$lib/view";
+  import { currentPalette, theme } from "$lib/theme.svelte";
   import Icon from "./Icon.svelte";
   import ContextMenu, { type MenuEntry } from "./ContextMenu.svelte";
 
@@ -85,6 +86,7 @@
     options.set("enableSignatureEditor", true);
     options.set("enableHighlightFloatingButton", true);
     options.set("enableAltTextModelDownload", false);
+    options.set("viewerCssTheme", theme.mode === "dark" ? 2 : 1);
 
     // The viewer's own security policy allows stylesheets from the app, not inline styles.
     const link = w.document.createElement("link");
@@ -92,6 +94,7 @@
     link.href = "/billy-viewer.css";
     w.document.head.append(link);
     w.addEventListener("keydown", onKeydown, true);
+    themeViewer();
 
     w.PDFViewerApplication.initializedPromise.then(() => {
       app = w.PDFViewerApplication;
@@ -100,6 +103,47 @@
   }
 
   document.addEventListener("webviewerloaded", onViewerLoaded);
+
+  /** Gives PDF.js's toolbar and surroundings Billy's colors and light or dark mode. Pages keep
+   *  their own colors. */
+  function themeViewer() {
+    const w = viewerWindow;
+    if (!w) return;
+    const root = w.document.documentElement as HTMLElement;
+    const p = currentPalette();
+    const mix = (color: string, amount: number, base = "transparent") => `color-mix(in srgb, ${color} ${amount}%, ${base})`;
+    const vars: Record<string, string> = {
+      "--main-color": p.fg,
+      "--body-bg-color": mix(p.fg, theme.mode === "dark" ? 6 : 12, p.bg),
+      "--toolbar-bg-color": p.panel,
+      "--sidebar-toolbar-bg-color": p.panel,
+      "--sidebar-narrow-bg-color": p.panel,
+      "--toolbar-border-color": p.line,
+      "--toolbar-icon-bg-color": p.fg,
+      "--field-color": p.fg,
+      "--field-bg-color": p.raised,
+      "--field-border-color": p.line,
+      "--button-hover-color": mix(p.fg, 10),
+      "--toggled-btn-bg-color": mix(p.accent, 28),
+      "--dropdown-btn-bg-color": p.raised,
+      "--doorhanger-bg-color": p.raised,
+      "--doorhanger-border-color": p.line,
+      "--doorhanger-hover-color": p.fg,
+      "--separator-color": p.line,
+      "--progressBar-color": p.accent,
+      "--treeitem-color": p.fg,
+      "--treeitem-hover-color": p.fg,
+    };
+    root.style.colorScheme = theme.mode;
+    for (const [name, value] of Object.entries(vars)) root.style.setProperty(name, value);
+  }
+
+  // Follow theme changes while the reader is open.
+  $effect(() => {
+    void theme.mode;
+    void theme.colorTheme;
+    themeViewer();
+  });
 
   function onKeydown(event: KeyboardEvent) {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
@@ -474,6 +518,8 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-family: var(--font-display);
+    font-size: 14px;
     font-weight: 600;
   }
 

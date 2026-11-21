@@ -1,5 +1,7 @@
-/* Design tokens. Milestone 7 turns these into switchable color and type themes. */
+/* Design tokens. The values below are the defaults (Oak, System fonts); the chosen color and
+   type themes replace them at startup (see src/lib/theme.svelte.ts). */
 :root {
+  --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
   --bg: #f6f4ef;
   --panel: #ece8df;
   --raised: #fffdf9;
@@ -51,6 +53,13 @@ body {
   font: 13px/1.4 var(--font-ui);
   user-select: none;
   -webkit-user-select: none;
+}
+
+/* Titles and headings use the type theme's display font. */
+h1,
+h2,
+.display {
+  font-family: var(--font-display);
 }
 
 button,

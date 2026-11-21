@@ -18,6 +18,7 @@
     onOpenSettings: () => void;
     onFolderMenu: (event: MouseEvent, node: FolderNode) => void;
     onLibraryMenu: (event: MouseEvent, library: Library) => void;
+    onOpenAppSettings: () => void;
   }
 
   let {
@@ -34,6 +35,7 @@
     onOpenSettings,
     onFolderMenu,
     onLibraryMenu,
+    onOpenAppSettings,
   }: Props = $props();
 
   function libraryMenu(event: MouseEvent, library: Library) {
@@ -64,7 +66,7 @@
 <aside>
   <div class="brand">
     <Icon name="shelf" size={20} />
-    <span>Billy</span>
+    <span class="display">Billy</span>
   </div>
 
   <div class="section-head">
@@ -144,7 +146,12 @@
     </div>
   {/if}
 
-  <p class="version">Billy {version}</p>
+  <div class="foot">
+    <button class="settings" onclick={onOpenAppSettings}>
+      <Icon name="settings" size={14} /> Settings
+    </button>
+    <span class="version">Billy {version}</span>
+  </div>
 </aside>
 
 <style>
@@ -276,8 +283,34 @@
     text-decoration: underline;
   }
 
+  .foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 8px;
+    padding: 8px 4px 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .settings {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--muted);
+  }
+
+  .settings:hover {
+    background: var(--hover);
+    color: var(--fg);
+  }
+
   .version {
-    margin: 8px 8px 0;
     font-size: 11px;
     color: var(--muted);
   }

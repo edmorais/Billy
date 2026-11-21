@@ -118,6 +118,8 @@ function makeSamplePdf(): Uint8Array {
 
 const samplePdf = makeSamplePdf();
 
+const appSettings: Record<string, unknown> = {};
+
 export function installMock() {
   const { folders, docs } = build();
   const library: Library = {
@@ -149,6 +151,11 @@ export function installMock() {
       switch (cmd) {
         case "app_version":
           return "0.1.0 (mock)";
+        case "get_settings":
+          return { ...appSettings };
+        case "set_setting":
+          appSettings[a.key] = a.value;
+          return null;
         case "list_libraries":
           return [library];
         case "save_view_settings":

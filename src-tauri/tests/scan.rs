@@ -307,6 +307,16 @@ fn folder_and_file_paths() {
 }
 
 #[test]
+fn app_settings_round_trip() {
+    let s = setup();
+    assert_eq!(db::settings::get_all(&s.conn).unwrap(), serde_json::json!({}));
+    let theme = serde_json::json!({ "appearance": "dark", "colorTheme": "sage", "typeTheme": "bookish" });
+    db::settings::set(&s.conn, "theme", &theme).unwrap();
+    db::settings::set(&s.conn, "theme", &theme).unwrap();
+    assert_eq!(db::settings::get_all(&s.conn).unwrap(), serde_json::json!({ "theme": theme }));
+}
+
+#[test]
 fn view_settings_round_trip() {
     let s = setup();
     let library = libraries::create_library(&s.conn, "Books").unwrap();
