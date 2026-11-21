@@ -99,7 +99,8 @@ annotations      file_id, copy_path, source_fingerprint, updated_at
   - When it is off, the folder changes only when you click "Sync now". That command is in the folder's right-click menu and in library settings.
 - **New files** are added to the library.
 - **Changed files** (different size or modification time) are fingerprinted again. Their thumbnail and metadata are refreshed.
-- **Moved or renamed files** are recognized by their fingerprint. Favorites, read status and annotations follow the file.
+- **Moved or renamed files** are recognized by their fingerprint. Favorites, read status and annotations follow the file. This works whichever folder is synced first, and across libraries. A file on an offline folder is never taken as "moved", because its drive is just not there.
+- **Changes during a sync** are not lost: if a folder changes while it is being synced, Billy syncs it again when the first sync ends. The watcher waits until a folder has been quiet for 2 seconds, so copying many books gives one sync.
 - **Missing files** are marked as missing, not deleted. By default they are hidden, and you can show them as greyed-out entries. "Clean up missing files…" lists them and asks for confirmation before deleting their favorites, read status and annotated copies.
 - **Offline root folders** happen, for example, when a drive is unplugged. Billy marks the folder as offline and changes nothing. Its files are shown as unavailable.
 

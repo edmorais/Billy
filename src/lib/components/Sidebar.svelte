@@ -16,6 +16,7 @@
     onToggle: (id: number) => void;
     onCreateLibrary: (name: string) => Promise<boolean>;
     onOpenSettings: () => void;
+    onFolderMenu: (event: MouseEvent, node: FolderNode) => void;
   }
 
   let {
@@ -30,6 +31,7 @@
     onToggle,
     onCreateLibrary,
     onOpenSettings,
+    onFolderMenu,
   }: Props = $props();
 
   let creating = $state(false);
@@ -117,6 +119,7 @@
               currentId={folderId}
               onSelect={onSelectFolder}
               {onToggle}
+              onContextMenu={onFolderMenu}
             />
           {/each}
         </ul>

@@ -10,7 +10,9 @@
     type Doc,
     type FolderNode,
     type Library,
+    type ScanReport,
   } from "$lib/api";
+  import CleanUpDialog from "$lib/components/CleanUpDialog.svelte";
   import { collator, fold, readSettings, sortDocs, defaultSettings, type SortField, type ViewSettings } from "$lib/view";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import Toolbar from "$lib/components/Toolbar.svelte";
@@ -230,6 +232,7 @@
     const id = libraryId;
     const folder = scopeId;
     const deep = recursive;
+    const withMissing = settings.showMissing;
     void docsVersion;
     const request = ++docsRequest;
     // The library itself shows only its root folders, unless subfolders are included.
@@ -237,10 +240,45 @@
       docs = [];
       return;
     }
-    api.listDocuments(id, folder, deep).then((list) => {
+    api.listDocuments(id, folder, deep, false, withMissing).then((list) => {
       if (request === docsRequest) docs = list;
     }, showError);
   });
+
+  /** Files in this library that disappeared from disk. */
+  let missingCount = $state(0);
+  let showCleanUp = $state(false);
+  $effect(() => {
+    const id = libraryId;
+    void docsVersion;
+    if (id === null) {
+      missingCount = 0;
+      return;
+    }
+    api.listMissing(id).then((list) => {
+      if (libraryId === id) missingCount = list.length;
+    }, showError);
+  });
+
+  /** A short summary of what a sync changed, or nothing when it changed nothing. */
+  function syncSummary(report: ScanReport): string {
+    const parts: string[] = [];
+    if (report.newFiles) parts.push(`${report.newFiles} new`);
+    if (report.moved) parts.push(`${report.moved} moved or renamed`);
+    if (report.missing) parts.push(`${report.missing} missing`);
+    if (report.removed) parts.push(`${report.removed} removed`);
+    const root = folders.find((f) => f.rootId === report.rootId && f.parentId === null);
+    const name = root?.name ?? "Folder";
+    if (report.offline) return `${name} is offline, so nothing changed.`;
+    return parts.length ? `Synced ${name}: ${parts.join(", ")}.` : "";
+  }
+
+  function flash(message: string, ms = 4000) {
+    notice = message;
+    setTimeout(() => {
+      if (notice === message) notice = "";
+    }, ms);
+  }
 
   function showError(err: unknown) {
     error = String(err);
@@ -320,6 +358,8 @@
 
   // Until the reader arrives (milestone 6), opening a document uses the default PDF app.
   function openDoc(doc: Doc) {
+    if (doc.missing) return flash("This file is no longer on disk.");
+    if (doc.offline) return flash("This file's folder is unavailable. Is its drive connected?");
     api.openWithDefaultApp(doc.fileId).catch(showError);
   }
 
@@ -380,7 +420,8 @@
         ...point,
         entries: [
           { label: "Open", icon: "folder", action: () => navigate(folder.id) },
-          { label: "Open in File Explorer", icon: "folder-open", action: () => api.openFolder(folder.id).catch(showError) },
+          { label: "Open in File Explorer", icon: "folder-open", disabled: folder.offline, action: () => api.openFolder(folder.id).catch(showError) },
+          { label: "Sync now", icon: "sync", action: () => syncFolder(folder) },
           "separator",
           { label: "Copy path", icon: "copy", action: () => copyText(folderPath(folder)) },
         ],
@@ -388,11 +429,15 @@
       return;
     }
     const doc = item.doc;
+    const unavailable = doc.missing || doc.offline;
     menu = {
       ...point,
       entries: [
-        { label: "Open with default app", icon: "external", action: () => openDoc(doc) },
-        { label: "Show in folder", icon: "folder-open", action: () => api.showInFolder(doc.fileId).catch(showError) },
+        { label: "Open with default app", icon: "external", disabled: unavailable, action: () => openDoc(doc) },
+        { label: "Show in folder", icon: "folder-open", disabled: unavailable, action: () => api.showInFolder(doc.fileId).catch(showError) },
+        ...(doc.missing
+          ? ([{ label: "Clean up missing files…", icon: "alert", action: () => (showCleanUp = true) }] as MenuEntry[])
+          : []),
         "separator",
         doc.favorite
           ? { label: "Remove from favorites", icon: "star", action: () => setFavorite(doc, false) }
@@ -404,6 +449,12 @@
         { label: "Copy path", icon: "copy", action: () => copyText(doc.path) },
       ],
     };
+  }
+
+  /** Syncs the root folder that holds this folder. */
+  function syncFolder(folder: FolderNode) {
+    scanning[folder.rootId] = 0;
+    api.syncRoot(folder.rootId).catch(showError);
   }
 
   function onShelfMenu(event: MouseEvent, doc: Doc) {
@@ -437,7 +488,7 @@
       event.preventDefault();
       searchInput?.focus();
       searchInput?.select();
-    } else if (event.key === "Backspace" && !typing && !showSettings && !menu) {
+    } else if (event.key === "Backspace" && !typing && !showSettings && !showCleanUp && !menu) {
       event.preventDefault();
       goUp();
     }
@@ -457,6 +508,9 @@
         if (f.error) showError(f.error);
         else if (f.report?.errors.length) {
           error = `${f.report.errors.length} item(s) could not be read and were skipped. First: ${f.report.errors[0]}`;
+        } else if (f.report) {
+          const summary = syncSummary(f.report);
+          if (summary) flash(summary);
         }
         refreshAll();
       }),
@@ -510,6 +564,7 @@
     onToggle={toggle}
     onCreateLibrary={createLibrary}
     onOpenSettings={() => (showSettings = true)}
+    onFolderMenu={(e, node) => openMenu({ x: e.clientX, y: e.clientY }, { key: `f${node.id}`, kind: "folder", folder: node })}
   />
 
   <main>
@@ -586,6 +641,16 @@
       {#if thumbsLeft > 0}
         <span class="muted">Making covers… {thumbsLeft} left</span>
       {/if}
+      {#if missingCount > 0 && library}
+        <span class="missing">
+          {missingCount} missing ·
+          <button class="link" onclick={() => change({ showMissing: !settings.showMissing })}>
+            {settings.showMissing ? "Hide" : "Show"}
+          </button>
+          ·
+          <button class="link" onclick={() => (showCleanUp = true)}>Clean up…</button>
+        </span>
+      {/if}
     </footer>
   </main>
 </div>
@@ -600,6 +665,20 @@
     onDeleted={() => {
       showSettings = false;
       libraryId = null;
+      refreshAll();
+    }}
+    onError={showError}
+    {missingCount}
+    onCleanUp={() => (showCleanUp = true)}
+  />
+{/if}
+
+{#if showCleanUp && library}
+  <CleanUpDialog
+    {library}
+    onClose={() => (showCleanUp = false)}
+    onDone={(count) => {
+      flash(`Forgot ${count} missing ${count === 1 ? "file" : "files"}.`);
       refreshAll();
     }}
     onError={showError}
@@ -669,6 +748,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    color: var(--danger);
+  }
+
+  .missing {
     color: var(--danger);
   }
 

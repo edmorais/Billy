@@ -20,6 +20,8 @@ export interface ViewSettings {
   shelfSubfolders: boolean;
   /** The favorites shelf is expanded. */
   shelfOpen: boolean;
+  /** Show files that disappeared from disk, greyed out. */
+  showMissing: boolean;
   /** Folder shown when the library was last open. `null` is the library itself. */
   folderId: number | null;
 }
@@ -34,6 +36,7 @@ export const defaultSettings: ViewSettings = {
   favoritesOnly: false,
   shelfSubfolders: true,
   shelfOpen: true,
+  showMissing: false,
   folderId: null,
 };
 

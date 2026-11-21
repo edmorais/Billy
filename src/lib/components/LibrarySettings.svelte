@@ -12,9 +12,30 @@
     onChanged: () => void;
     onDeleted: () => void;
     onError: (message: string) => void;
+    /** Number of missing files in the library, and how to clean them up. */
+    missingCount: number;
+    onCleanUp: () => void;
   }
 
-  let { library, scanning, version, onClose, onChanged, onDeleted, onError }: Props = $props();
+  let { library, scanning, version, onClose, onChanged, onDeleted, onError, missingCount, onCleanUp }: Props =
+    $props();
+
+  async function setAutoSync(root: Root, on: boolean) {
+    try {
+      const updated = await api.setAutoSync(root.id, on);
+      roots = roots.map((r) => (r.id === updated.id ? updated : r));
+    } catch (err) {
+      onError(String(err));
+    }
+  }
+
+  function syncNow(root: Root) {
+    api.syncRoot(root.id).catch((err) => onError(String(err)));
+  }
+
+  function syncAll() {
+    api.syncLibrary(library.id).catch((err) => onError(String(err)));
+  }
 
   let roots = $state<Root[]>([]);
   let name = $state("");
@@ -118,7 +139,14 @@
   <section>
     <div class="section-head">
       <h3>Folders</h3>
-      <button class="btn primary" onclick={addFolder}><Icon name="plus" size={14} /> Add folder…</button>
+      <div class="actions">
+        {#if roots.length > 1}
+          <button class="btn" onclick={syncAll} disabled={roots.every((r) => r.id in scanning)}>
+            <Icon name="sync" size={14} /> Sync all
+          </button>
+        {/if}
+        <button class="btn primary" onclick={addFolder}><Icon name="plus" size={14} /> Add folder…</button>
+      </div>
     </div>
     {#if roots.length === 0}
       <p class="muted">No folders yet. Billy reads the PDFs in the folders you add, and never changes them.</p>
@@ -135,16 +163,36 @@
                 {:else if root.status === "offline"}
                   Offline: the folder can't be found. Its records are kept.
                 {:else}
-                  {root.fileCount} PDFs · last scanned {formatDate(root.lastSyncedAt)}
+                  {root.fileCount} PDFs · last synced {formatDate(root.lastSyncedAt)}
                 {/if}
               </span>
+              <label class="switch" title="Sync when Billy starts, and whenever the folder changes while Billy runs">
+                <input type="checkbox" checked={root.autoSync} onchange={(e) => setAutoSync(root, e.currentTarget.checked)} />
+                Auto-sync
+              </label>
             </div>
+            <button class="btn" onclick={() => syncNow(root)} disabled={root.id in scanning}>
+              <Icon name="sync" size={14} /> Sync now
+            </button>
             <button class="btn" onclick={() => removeFolder(root)} disabled={root.id in scanning}>Remove</button>
           </li>
         {/each}
       </ul>
+      <p class="hint muted">
+        With Auto-sync off, a folder only changes in Billy when you choose Sync now. Files that disappear are kept
+        as missing until you clean them up.
+      </p>
     {/if}
   </section>
+
+  {#if missingCount > 0}
+    <section class="missing">
+      <span>
+        {missingCount} {missingCount === 1 ? "file has" : "files have"} disappeared from disk.
+      </span>
+      <button class="btn" onclick={onCleanUp}>Clean up missing files…</button>
+    </section>
+  {/if}
 
   <footer>
     <button class="btn danger" onclick={deleteLibrary}>Delete library…</button>
@@ -243,5 +291,40 @@
 
   .root .muted {
     font-size: 12px;
+  }
+
+  .actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+    color: var(--fg);
+    font-size: 12px;
+  }
+
+  .switch input {
+    margin: 0;
+    accent-color: var(--accent);
+  }
+
+  .hint {
+    margin: 8px 0 0;
+    font-size: 12px;
+  }
+
+  .missing {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 0 18px 16px;
+    padding: 10px 12px;
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
   }
 </style>

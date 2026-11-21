@@ -1,4 +1,5 @@
 use crate::thumbs::ThumbQueue;
+use crate::watch::SyncWatcher;
 use rusqlite::Connection;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -11,22 +12,32 @@ pub struct AppState {
     /// Thumbnail cache, in %LOCALAPPDATA%\Billy\thumbs.
     pub thumbs_dir: PathBuf,
     pub thumbs: Arc<ThumbQueue>,
+    pub watcher: SyncWatcher,
     /// Roots being scanned right now.
     pub scanning: Mutex<HashSet<i64>>,
+    /// Roots that changed while being scanned, and need another scan when it ends.
+    pub rescan: Mutex<HashSet<i64>>,
 }
 
 impl AppState {
-    pub fn new(db: Connection, db_path: PathBuf, thumbs_dir: PathBuf) -> Self {
+    pub fn new(db: Connection, db_path: PathBuf, thumbs_dir: PathBuf, watcher: SyncWatcher) -> Self {
         Self {
             db: Mutex::new(db),
             db_path,
             thumbs_dir,
             thumbs: Arc::new(ThumbQueue::default()),
+            watcher,
             scanning: Mutex::new(HashSet::new()),
+            rescan: Mutex::new(HashSet::new()),
         }
     }
 
     pub fn db(&self) -> MutexGuard<'_, Connection> {
         self.db.lock().unwrap()
+    }
+
+    /// Billy's own data folder, %APPDATA%\Billy.
+    pub fn data_dir(&self) -> PathBuf {
+        self.db_path.parent().map(PathBuf::from).unwrap_or_default()
     }
 }

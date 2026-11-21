@@ -41,6 +41,19 @@ export interface Doc {
   thumbStatus: "pending" | "ok" | "error";
   read: boolean;
   favorite: boolean;
+  /** Gone from disk; Billy keeps the record until a clean-up. */
+  missing: boolean;
+  /** Its folder is unavailable, for example an unplugged drive. */
+  offline: boolean;
+}
+
+export interface MissingFile {
+  fileId: number;
+  path: string;
+  missingSince: number;
+  favorite: boolean;
+  read: boolean;
+  annotated: boolean;
 }
 
 export interface ThumbUpdate {
@@ -81,6 +94,9 @@ export interface ScanReport {
   rootId: number;
   files: number;
   newFiles: number;
+  moved: number;
+  missing: number;
+  removed: number;
   offline: boolean;
   errors: string[];
 }
@@ -100,8 +116,19 @@ export const api = {
   saveViewSettings: (id: number, settings: object) =>
     invoke<void>("save_view_settings", { id, settings }),
   folderTree: (libraryId: number) => invoke<FolderNode[]>("folder_tree", { libraryId }),
-  listDocuments: (libraryId: number, folderId: number | null, recursive: boolean, favoritesOnly = false) =>
-    invoke<Doc[]>("list_documents", { libraryId, folderId, recursive, favoritesOnly }),
+  listDocuments: (
+    libraryId: number,
+    folderId: number | null,
+    recursive: boolean,
+    favoritesOnly = false,
+    includeMissing = false,
+  ) => invoke<Doc[]>("list_documents", { libraryId, folderId, recursive, favoritesOnly, includeMissing }),
+  syncRoot: (rootId: number) => invoke<void>("sync_root", { rootId }),
+  syncLibrary: (libraryId: number) => invoke<void>("sync_library", { libraryId }),
+  setAutoSync: (rootId: number, on: boolean) => invoke<Root>("set_auto_sync", { rootId, on }),
+  listMissing: (libraryId: number) => invoke<MissingFile[]>("list_missing", { libraryId }),
+  cleanUpMissing: (libraryId: number, fileIds: number[]) =>
+    invoke<void>("clean_up_missing", { libraryId, fileIds }),
   setFavorite: (libraryId: number, fileIds: number[], favorite: boolean) =>
     invoke<void>("set_favorite", { libraryId, fileIds, favorite }),
   setRead: (libraryId: number, fileIds: number[], read: boolean) =>

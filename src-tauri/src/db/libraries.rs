@@ -147,6 +147,18 @@ pub fn insert_root(conn: &Connection, library_id: i64, path: &str) -> Result<Roo
     get_root(conn, conn.last_insert_rowid())
 }
 
+pub fn set_auto_sync(conn: &Connection, root_id: i64, on: bool) -> Result<Root> {
+    conn.execute("UPDATE roots SET auto_sync = ?2 WHERE id = ?1", params![root_id, on])?;
+    get_root(conn, root_id)
+}
+
+/// Every root folder, in every library, that has Auto-sync turned on.
+pub fn auto_sync_roots(conn: &Connection) -> Result<Vec<Root>> {
+    let mut stmt = conn.prepare(&format!("{ROOT_SELECT} WHERE auto_sync = 1"))?;
+    let rows = stmt.query_map([], root_from_row)?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
 /// Result of removing a root folder from a library.
 pub struct RemovedRoot {
     pub library_id: i64,

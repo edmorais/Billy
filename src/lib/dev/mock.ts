@@ -50,6 +50,9 @@ function build() {
         thumbStatus: "pending",
         read: rand() < 0.3,
         favorite: false,
+        // A few files have disappeared from disk, to try the missing-file views.
+        missing: fileId % 997 === 0,
+        offline: false,
       });
       fileId++;
     }
@@ -124,7 +127,25 @@ export function installMock() {
           return docs
             .filter((d) => !scope || scope.has(d.folderId))
             .filter((d) => !a.favoritesOnly || d.favorite)
+            .filter((d) => a.includeMissing || !d.missing)
             .map((d) => ({ ...d }));
+        }
+        case "list_missing":
+          return docs
+            .filter((d) => d.missing)
+            .map((d) => ({ fileId: d.fileId, path: d.path, missingSince: Date.now() - 864e5, favorite: d.favorite, read: d.read, annotated: false }));
+        case "clean_up_missing": {
+          const gone = new Set<number>(a.fileIds);
+          for (let i = docs.length - 1; i >= 0; i--) if (gone.has(docs[i].fileId)) docs.splice(i, 1);
+          return null;
+        }
+        case "sync_root":
+        case "sync_library":
+          return null;
+        case "set_auto_sync": {
+          const root = roots.find((r) => r.id === a.rootId)!;
+          root.autoSync = a.on;
+          return { ...root };
         }
         case "set_favorite":
           for (const d of docs) if (a.fileIds.includes(d.fileId)) d.favorite = a.favorite;

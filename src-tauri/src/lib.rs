@@ -5,6 +5,7 @@ pub mod fs_guard;
 pub mod scan;
 pub mod state;
 pub mod thumbs;
+pub mod watch;
 
 use serde::Serialize;
 use state::AppState;
@@ -34,9 +35,12 @@ pub fn run() {
             let db_path = app.path().data_dir()?.join("Billy").join("billy.db");
             let thumbs_dir = app.path().local_data_dir()?.join("Billy").join("thumbs");
             let conn = db::open(&db_path)?;
-            let state = AppState::new(conn, db_path.clone(), thumbs_dir.clone());
+            let sync_handle = app.handle().clone();
+            let watcher = watch::SyncWatcher::new(move |root_id| commands::spawn_scan(sync_handle.clone(), root_id));
+            let state = AppState::new(conn, db_path.clone(), thumbs_dir.clone(), watcher);
             let queue = state.thumbs.clone();
             app.manage(state);
+            commands::start_auto_sync(app.handle().clone());
 
             let handle = app.handle().clone();
             let error_handle = app.handle().clone();
@@ -68,6 +72,11 @@ pub fn run() {
             commands::open_with_default_app,
             commands::show_in_folder,
             commands::open_folder,
+            commands::sync_root,
+            commands::sync_library,
+            commands::set_auto_sync,
+            commands::list_missing,
+            commands::clean_up_missing,
             commands::list_roots,
             commands::scanning_roots,
             commands::add_root,

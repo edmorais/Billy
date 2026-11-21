@@ -12,9 +12,10 @@
     currentId: number | null;
     onSelect: (id: number) => void;
     onToggle: (id: number) => void;
+    onContextMenu: (event: MouseEvent, node: FolderNode) => void;
   }
 
-  let { node, depth, childrenOf, expanded, currentId, onSelect, onToggle }: Props = $props();
+  let { node, depth, childrenOf, expanded, currentId, onSelect, onToggle, onContextMenu }: Props = $props();
 
   let children = $derived(
     [...(childrenOf.get(node.id) ?? [])].sort((a, b) => collator.compare(a.name, b.name)),
@@ -37,7 +38,14 @@
     {:else}
       <span class="twisty"></span>
     {/if}
-    <button class="label" onclick={() => onSelect(node.id)}>
+    <button
+      class="label"
+      onclick={() => onSelect(node.id)}
+      oncontextmenu={(e) => {
+        e.preventDefault();
+        onContextMenu(e, node);
+      }}
+    >
       <Icon name="folder" size={14} />
       <span class="name">{node.name}</span>
       <span class="count">{node.offline ? "offline" : node.total}</span>
@@ -46,7 +54,16 @@
   {#if isOpen && children.length}
     <ul role="group">
       {#each children as child (child.id)}
-        <FolderTreeNode node={child} depth={depth + 1} {childrenOf} {expanded} {currentId} {onSelect} {onToggle} />
+        <FolderTreeNode
+          node={child}
+          depth={depth + 1}
+          {childrenOf}
+          {expanded}
+          {currentId}
+          {onSelect}
+          {onToggle}
+          {onContextMenu}
+        />
       {/each}
     </ul>
   {/if}

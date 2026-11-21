@@ -1,16 +1,18 @@
-//! Scanning library folders for PDFs.
+//! Scanning and syncing library folders.
 //!
 //! The scanner only reads library folders, through [`crate::fs_guard`]. Everything it
-//! learns is written to Billy's database.
+//! learns is written to Billy's database. A scan is also a sync: it adds new PDFs, updates
+//! changed ones, follows moved and renamed files, and marks files that disappeared as missing.
 
 pub mod fingerprint;
 
-use crate::db::{libraries, now_ms};
+use crate::db::{libraries::is_inside, now_ms};
+use crate::db::libraries;
 use crate::error::Result;
 use crate::fs_guard;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// Files are committed and progress is reported after every batch of this many PDFs.
@@ -29,17 +31,40 @@ pub struct ScanReport {
     pub root_id: i64,
     /// PDFs found under the root.
     pub files: u64,
-    /// PDFs that were added to the library by this scan.
+    /// PDFs added to the library by this scan.
     pub new_files: u64,
+    /// PDFs found at a new path that Billy recognized by their content.
+    pub moved: u64,
+    /// PDFs that disappeared from disk and are now marked as missing.
+    pub missing: u64,
+    /// PDFs that left this folder for a place outside the library, or are now ignored.
+    pub removed: u64,
     /// The root folder could not be found, for example because its drive is unplugged.
     pub offline: bool,
     /// Items that could not be read. The scan skips them and carries on.
     pub errors: Vec<String>,
 }
 
-/// Scans one root folder and adds every PDF in it to the root's library.
-///
-/// This adds and updates records only. Files that have disappeared are handled by sync.
+/// A root folder of any library.
+struct RootInfo {
+    path: String,
+    depth: usize,
+}
+
+fn all_roots(conn: &Connection) -> Result<HashMap<i64, RootInfo>> {
+    let mut stmt = conn.prepare("SELECT id, path FROM roots")?;
+    let rows = stmt.query_map([], |r| {
+        let path: String = r.get(1)?;
+        Ok((r.get::<_, i64>(0)?, RootInfo { depth: Path::new(&path).components().count(), path }))
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+fn exists(path: &str) -> bool {
+    fs_guard::metadata(Path::new(path)).is_ok()
+}
+
+/// Scans one root folder and brings its library up to date.
 pub fn scan_root(
     conn: &mut Connection,
     root_id: i64,
@@ -49,6 +74,7 @@ pub fn scan_root(
     let root_path = PathBuf::from(&root.path);
     let mut report = ScanReport { root_id, ..Default::default() };
 
+    // An unplugged drive or a renamed folder: change nothing, so no file is marked missing.
     if !fs_guard::is_dir(&root_path) {
         conn.execute("UPDATE roots SET status = 'offline' WHERE id = ?1", [root_id])?;
         report.offline = true;
@@ -56,14 +82,10 @@ pub fn scan_root(
     }
 
     let now = now_ms();
-    // How deep each root of this library sits. When roots overlap, the outermost root owns
-    // the shared documents, so they appear under it in the folder tree.
-    let root_depths: HashMap<i64, usize> = libraries::list_roots(conn, root.library_id)?
-        .into_iter()
-        .map(|r| (r.id, Path::new(&r.path).components().count()))
-        .collect();
-    let my_depth = root_depths.get(&root_id).copied().unwrap_or(0);
+    let roots = all_roots(conn)?;
+    let my_depth = roots.get(&root_id).map(|r| r.depth).unwrap_or(0);
     let mut folder_ids: HashMap<PathBuf, i64> = HashMap::new();
+    let mut seen: HashSet<i64> = HashSet::new();
     let mut tx = conn.transaction()?;
     let mut in_batch = 0;
 
@@ -97,13 +119,36 @@ pub fn scan_root(
             continue;
         };
 
-        let file_id = match import_file(&tx, path) {
-            Ok(id) => id,
+        let (file_id, moved) = match import_file(&tx, path, &roots) {
+            Ok(result) => result,
             Err(err) => {
                 report.errors.push(format!("{}: {err}", path.display()));
                 continue;
             }
         };
+        seen.insert(file_id);
+        let path_str = path.to_string_lossy();
+
+        if moved {
+            report.moved += 1;
+            // Other libraries whose folders no longer hold the file lose it. Their scans would
+            // find out too, but this keeps them right in the meantime.
+            let mut stmt = tx.prepare("SELECT library_id, root_id FROM entries WHERE file_id = ?1")?;
+            let stale: Vec<(i64, i64)> = stmt
+                .query_map([file_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+                .into_iter()
+                .filter(|(library, owner)| {
+                    *library != root.library_id
+                        && roots.get(owner).is_none_or(|r| !is_inside(&path_str, &r.path))
+                })
+                .collect();
+            drop(stmt);
+            for (library, _) in stale {
+                tx.execute("DELETE FROM entries WHERE library_id = ?1 AND file_id = ?2", params![library, file_id])?;
+            }
+        }
+
         let owner: Option<i64> = tx
             .query_row(
                 "SELECT root_id FROM entries WHERE library_id = ?1 AND file_id = ?2",
@@ -118,16 +163,30 @@ pub fn scan_root(
                      VALUES (?1, ?2, ?3, ?4, ?5)",
                     params![root.library_id, root_id, file_id, folder_id, now],
                 )?;
-                report.new_files += 1;
+                if !moved {
+                    report.new_files += 1;
+                }
             }
-            Some(owner) if owner != root_id && root_depths.get(&owner).is_some_and(|&d| d > my_depth) => {
-                // An inner root owned this document; this outer root takes it over.
+            Some(owner) if owner == root_id => {
+                // The file may have moved to another folder of this root.
                 tx.execute(
-                    "UPDATE entries SET root_id = ?3, folder_id = ?4 WHERE library_id = ?1 AND file_id = ?2",
-                    params![root.library_id, file_id, root_id, folder_id],
+                    "UPDATE entries SET folder_id = ?3 WHERE library_id = ?1 AND file_id = ?2 AND folder_id != ?3",
+                    params![root.library_id, file_id, folder_id],
                 )?;
             }
-            Some(_) => {}
+            Some(owner) => {
+                // When roots overlap, the outermost root that holds the file owns it.
+                let take_over = match roots.get(&owner) {
+                    None => true,
+                    Some(r) => !is_inside(&path_str, &r.path) || r.depth > my_depth,
+                };
+                if take_over {
+                    tx.execute(
+                        "UPDATE entries SET root_id = ?3, folder_id = ?4 WHERE library_id = ?1 AND file_id = ?2",
+                        params![root.library_id, file_id, root_id, folder_id],
+                    )?;
+                }
+            }
         }
         report.files += 1;
 
@@ -137,6 +196,36 @@ pub fn scan_root(
             tx = conn.transaction()?;
             in_batch = 0;
             progress(&ScanProgress { root_id, files_found: report.files });
+        }
+    }
+
+    // Documents of this root that the walk did not find.
+    let unseen: Vec<(i64, String, bool)> = {
+        let mut stmt = tx.prepare(
+            "SELECT e.file_id, x.path, x.missing_since IS NOT NULL
+             FROM entries e JOIN files x ON x.id = e.file_id WHERE e.root_id = ?1",
+        )?;
+        stmt.query_map([root_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .filter(|(id, _, _)| !seen.contains(id))
+            .collect()
+    };
+    for (file_id, path, already_missing) in unseen {
+        if !exists(&path) {
+            // Gone from disk. Keep everything, so it comes back if the file does.
+            if !already_missing {
+                tx.execute("UPDATE files SET missing_since = ?2 WHERE id = ?1", params![file_id, now])?;
+                report.missing += 1;
+            }
+        } else if !is_inside(&path, &root.path) || report.errors.is_empty() {
+            // Still on disk, but moved out of this folder or now hidden. When the walk had
+            // errors, Billy may simply have failed to read it, so it is left alone.
+            tx.execute(
+                "DELETE FROM entries WHERE library_id = ?1 AND file_id = ?2",
+                params![root.library_id, file_id],
+            )?;
+            report.removed += 1;
         }
     }
 
@@ -166,9 +255,10 @@ fn upsert_folder(
     Ok(id)
 }
 
-/// Adds or updates the record for one PDF and returns its id. A file is fingerprinted only
-/// when it is new or its size or modification time changed.
-fn import_file(tx: &Transaction, path: &Path) -> Result<i64> {
+/// Adds or updates the record for one PDF. Returns its id, and whether it is a known file
+/// that moved here. A file is fingerprinted only when it is new or its size or modification
+/// time changed.
+fn import_file(tx: &Transaction, path: &Path, roots: &HashMap<i64, RootInfo>) -> Result<(i64, bool)> {
     let meta = fs_guard::metadata(path)?;
     let size = meta.len() as i64;
     let mtime = fs_guard::mtime_ms(&meta);
@@ -184,8 +274,8 @@ fn import_file(tx: &Transaction, path: &Path) -> Result<i64> {
 
     match existing {
         Some((id, old_size, old_mtime)) if old_size == size && old_mtime == mtime => {
-            tx.execute("UPDATE files SET missing_since = NULL WHERE id = ?1", [id])?;
-            Ok(id)
+            tx.execute("UPDATE files SET missing_since = NULL WHERE id = ?1 AND missing_since IS NOT NULL", [id])?;
+            Ok((id, false))
         }
         Some((id, _, _)) => {
             let fp = fingerprint::fingerprint(path)?;
@@ -196,15 +286,56 @@ fn import_file(tx: &Transaction, path: &Path) -> Result<i64> {
                  WHERE id = ?1",
                 params![id, size, mtime, fp],
             )?;
-            Ok(id)
+            Ok((id, false))
         }
         None => {
             let fp = fingerprint::fingerprint(path)?;
+            if let Some(id) = moved_from(tx, &fp, roots)? {
+                tx.execute(
+                    "UPDATE files SET path = ?2, size = ?3, mtime = ?4, missing_since = NULL WHERE id = ?1",
+                    params![id, path_str, size, mtime],
+                )?;
+                return Ok((id, true));
+            }
             tx.execute(
                 "INSERT INTO files (path, size, mtime, fingerprint) VALUES (?1, ?2, ?3, ?4)",
                 params![path_str, size, mtime, fp],
             )?;
-            Ok(tx.last_insert_rowid())
+            Ok((tx.last_insert_rowid(), false))
         }
     }
+}
+
+/// Finds a known file with this fingerprint whose old path no longer exists: the file has
+/// moved. Files on an unavailable root folder (an unplugged drive) are never taken, because
+/// they have not gone anywhere.
+fn moved_from(tx: &Transaction, fingerprint: &str, roots: &HashMap<i64, RootInfo>) -> Result<Option<i64>> {
+    let mut stmt = tx.prepare(
+        "SELECT id, path FROM files WHERE fingerprint = ?1 ORDER BY missing_since IS NULL, id",
+    )?;
+    let candidates: Vec<(i64, String)> = stmt
+        .query_map([fingerprint], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    for (id, old_path) in candidates {
+        if exists(&old_path) {
+            continue;
+        }
+        let on_unavailable_root = roots
+            .values()
+            .any(|r| is_inside(&old_path, &r.path) && !fs_guard::is_dir(Path::new(&r.path)));
+        if !on_unavailable_root {
+            return Ok(Some(id));
+        }
+    }
+    Ok(None)
+}
+
+/// Checks every root folder and marks it offline or available. Cheap; run at startup.
+pub fn refresh_root_status(conn: &Connection) -> Result<()> {
+    let roots = all_roots(conn)?;
+    for (id, root) in roots {
+        let status = if fs_guard::is_dir(Path::new(&root.path)) { "ok" } else { "offline" };
+        conn.execute("UPDATE roots SET status = ?2 WHERE id = ?1 AND status != ?2", params![id, status])?;
+    }
+    Ok(())
 }

@@ -29,6 +29,8 @@
     external: "M9 2.5h4.5V7M13.5 2.5L7 9M11.5 9.5v3a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3",
     "folder-open": "M2 12.5V4a1 1 0 0 1 1-1h3l1.5 1.5H12a1 1 0 0 1 1 1V7M2 12.5L4 7h11l-2 5.5z",
     copy: "M5.5 5.5h7v8h-7zM3.5 10.5v-8h7",
+    sync: "M13 6.5A5 5 0 0 0 3.6 5M3 9.5A5 5 0 0 0 12.4 11M3.5 2.5V5H6M12.5 13.5V11H10",
+    alert: "M8 2l6.5 11.5h-13zM8 6.5v3.5M8 12v.01",
   } as const;
 
   export type IconName = keyof typeof paths;

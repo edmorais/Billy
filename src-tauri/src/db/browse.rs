@@ -101,6 +101,10 @@ pub struct Document {
     pub thumb_status: String,
     pub read: bool,
     pub favorite: bool,
+    /// The file is gone from disk; Billy keeps its record until a clean-up.
+    pub missing: bool,
+    /// The file's root folder is unavailable, for example an unplugged drive.
+    pub offline: bool,
 }
 
 /// Lists the documents of a library. With `folder_id`, only that folder, and with `recursive`
@@ -113,7 +117,20 @@ pub fn list_documents(
     recursive: bool,
     favorites_only: bool,
 ) -> Result<Vec<Document>> {
+    list_documents_with(conn, library_id, folder_id, recursive, favorites_only, false)
+}
+
+/// Like [`list_documents`], and with `include_missing` also lists missing files.
+pub fn list_documents_with(
+    conn: &Connection,
+    library_id: i64,
+    folder_id: Option<i64>,
+    recursive: bool,
+    favorites_only: bool,
+    include_missing: bool,
+) -> Result<Vec<Document>> {
     let favorites = if favorites_only { "AND fav.file_id IS NOT NULL" } else { "" };
+    let missing = if include_missing { "" } else { "AND x.missing_since IS NULL" };
     let scope = match (folder_id, recursive) {
         (None, _) => "",
         (Some(_), false) => "AND e.folder_id = ?2",
@@ -130,12 +147,14 @@ pub fn list_documents(
     let sql = format!(
         "SELECT x.id, x.path, e.folder_id, x.size, x.mtime, e.date_added, x.page_count,
                 x.title, x.author, x.fingerprint,
-                COALESCE(rs.read, 0), fav.file_id IS NOT NULL, x.thumb_status
+                COALESCE(rs.read, 0), fav.file_id IS NOT NULL, x.thumb_status,
+                x.missing_since IS NOT NULL, r.status = 'offline'
          FROM entries e
          JOIN files x ON x.id = e.file_id
+         JOIN roots r ON r.id = e.root_id
          LEFT JOIN read_state rs ON rs.library_id = e.library_id AND rs.file_id = e.file_id
          LEFT JOIN favorites fav ON fav.library_id = e.library_id AND fav.file_id = e.file_id
-         WHERE e.library_id = ?1 AND x.missing_since IS NULL {scope} {favorites}"
+         WHERE e.library_id = ?1 {missing} {scope} {favorites}"
     );
     let mut stmt = conn.prepare(&sql)?;
     let map = |r: &rusqlite::Row| {
@@ -159,6 +178,8 @@ pub fn list_documents(
             thumb_status: r.get(12)?,
             read: r.get(10)?,
             favorite: r.get(11)?,
+            missing: r.get(13)?,
+            offline: r.get(14)?,
         })
     };
     let rows = match folder_id {

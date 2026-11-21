@@ -224,6 +224,11 @@
 </script>
 
 {#snippet badges(doc: Doc)}
+  {#if doc.missing}
+    <span class="badge warn" title="Missing: this file is no longer on disk"><Icon name="alert" size={11} /></span>
+  {:else if doc.offline}
+    <span class="badge warn" title="Offline: this file's folder is unavailable"><Icon name="alert" size={11} /></span>
+  {/if}
   {#if doc.favorite}<span class="badge fav" title="Favorite"><Icon name="star" size={11} filled /></span>{/if}
   {#if doc.read}<span class="badge read" title="Read"><Icon name="check" size={11} /></span>{/if}
 {/snippet}
@@ -280,6 +285,7 @@
                   class="item"
                   class:chip={row.chips}
                   class:selected={item.key === selected}
+                  class:unavailable={item.kind === "doc" && (item.doc.missing || item.doc.offline)}
                   role="option"
                   tabindex="-1"
                   aria-selected={item.key === selected}
@@ -431,6 +437,17 @@
 
   .badge.read {
     color: var(--muted);
+  }
+
+  .badge.warn {
+    color: var(--danger);
+  }
+
+  .item.unavailable :global(.thumb),
+  .item.unavailable :global(.cover),
+  .item.unavailable .name {
+    opacity: 0.45;
+    filter: grayscale(1);
   }
 
   /* Grids */

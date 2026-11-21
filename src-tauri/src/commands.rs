@@ -2,6 +2,7 @@
 
 use crate::db::browse::{self, Document, FolderNode};
 use crate::db::libraries::{Library, Root};
+use crate::db::missing::{self, MissingFile};
 use crate::db::{self, libraries, marks};
 use crate::error::{Error, Result};
 use crate::fs_guard;
@@ -34,7 +35,11 @@ pub fn rename_library(state: State<AppState>, id: i64, name: String) -> Result<L
 
 #[tauri::command]
 pub fn delete_library(state: State<AppState>, id: i64) -> Result<()> {
-    libraries::delete_library(&state.db(), id)
+    let db = state.db();
+    for root in libraries::list_roots(&db, id)? {
+        state.watcher.unwatch(root.id);
+    }
+    libraries::delete_library(&db, id)
 }
 
 #[tauri::command]
@@ -54,8 +59,61 @@ pub fn list_documents(
     folder_id: Option<i64>,
     recursive: bool,
     favorites_only: bool,
+    include_missing: bool,
 ) -> Result<Vec<Document>> {
-    browse::list_documents(&state.db(), library_id, folder_id, recursive, favorites_only)
+    browse::list_documents_with(&state.db(), library_id, folder_id, recursive, favorites_only, include_missing)
+}
+
+/// Syncs one root folder now, in the background.
+#[tauri::command]
+pub fn sync_root(app: AppHandle, root_id: i64) {
+    spawn_scan(app, root_id);
+}
+
+/// Syncs every folder of a library now, in the background.
+#[tauri::command]
+pub fn sync_library(app: AppHandle, state: State<AppState>, library_id: i64) -> Result<()> {
+    let roots = libraries::list_roots(&state.db(), library_id)?;
+    for root in roots {
+        spawn_scan(app.clone(), root.id);
+    }
+    Ok(())
+}
+
+/// Turns Auto-sync on or off for a root folder. Turning it on also syncs the folder now.
+#[tauri::command]
+pub fn set_auto_sync(app: AppHandle, state: State<AppState>, root_id: i64, on: bool) -> Result<Root> {
+    let root = libraries::set_auto_sync(&state.db(), root_id, on)?;
+    if on {
+        if let Err(err) = state.watcher.watch(root.id, &PathBuf::from(&root.path)) {
+            // The folder may be offline; the startup check will try again next time.
+            eprintln!("could not watch {}: {err}", root.path);
+        }
+        spawn_scan(app, root.id);
+    } else {
+        state.watcher.unwatch(root.id);
+    }
+    Ok(root)
+}
+
+#[tauri::command]
+pub fn list_missing(state: State<AppState>, library_id: i64) -> Result<Vec<MissingFile>> {
+    missing::list_missing(&state.db(), library_id)
+}
+
+/// Forgets missing files in a library, after the user confirmed it, and deletes their
+/// annotated copies from Billy's data folder.
+#[tauri::command]
+pub fn clean_up_missing(state: State<AppState>, library_id: i64, file_ids: Vec<i64>) -> Result<()> {
+    let copies = missing::clean_up(&mut state.db(), library_id, &file_ids)?;
+    let data_dir = state.data_dir();
+    for copy in copies {
+        // Only ever delete inside Billy's own data folder.
+        if copy.starts_with(&data_dir) {
+            let _ = std::fs::remove_file(copy);
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -132,6 +190,7 @@ pub fn add_root(app: AppHandle, state: State<AppState>, library_id: i64, path: S
 pub async fn remove_root(app: AppHandle, root_id: i64, purge: bool) -> Result<()> {
     tauri::async_runtime::spawn_blocking(move || -> Result<()> {
         let state = app.state::<AppState>();
+        state.watcher.unwatch(root_id);
         let removed = libraries::remove_root(&state.db(), root_id)?;
         // Overlapping roots may have shared documents with the removed one, so scan them
         // again before deciding which documents left the library.
@@ -156,11 +215,13 @@ struct ScanFinished {
     error: Option<String>,
 }
 
-/// Scans a root on a background thread. Emits `scan-progress` while it runs and
-/// `scan-finished` at the end. Does nothing if that root is already being scanned.
+/// Scans (syncs) a root on a background thread. Emits `scan-progress` while it runs and
+/// `scan-finished` at the end. If the root is already being scanned, it is scanned again
+/// when the current scan ends, so changes made meanwhile are not missed.
 pub fn spawn_scan(app: AppHandle, root_id: i64) {
     let state = app.state::<AppState>();
     if !state.scanning.lock().unwrap().insert(root_id) {
+        state.rescan.lock().unwrap().insert(root_id);
         return;
     }
     let db_path = state.db_path.clone();
@@ -180,5 +241,28 @@ pub fn spawn_scan(app: AppHandle, root_id: i64) {
             Err(err) => ScanFinished { root_id, report: None, error: Some(err.to_string()) },
         };
         let _ = app.emit("scan-finished", payload);
+        if state.rescan.lock().unwrap().remove(&root_id) {
+            spawn_scan(app.clone(), root_id);
+        }
+    });
+}
+
+/// At startup: checks which root folders are available, then syncs and watches the ones with
+/// Auto-sync turned on.
+pub fn start_auto_sync(app: AppHandle) {
+    std::thread::spawn(move || {
+        let state = app.state::<AppState>();
+        let roots = (|| -> Result<Vec<Root>> {
+            let conn = db::open(&state.db_path)?;
+            scan::refresh_root_status(&conn)?;
+            libraries::auto_sync_roots(&conn)
+        })();
+        let Ok(roots) = roots else { return };
+        for root in roots {
+            if state.watcher.watch(root.id, &PathBuf::from(&root.path)).is_err() {
+                continue; // Offline; it stays as it was.
+            }
+            spawn_scan(app.clone(), root.id);
+        }
     });
 }
