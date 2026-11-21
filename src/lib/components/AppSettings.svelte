@@ -3,7 +3,11 @@
   import { api } from "$lib/api";
   import {
     applyTheme,
+    cleanFontName,
     colorThemes,
+    currentSettings,
+    customTypeTheme,
+    fontInstalled,
     theme,
     typeThemes,
     type Appearance,
@@ -19,15 +23,25 @@
     dialog.showModal();
   });
 
+  // Saves run one after another, so quick changes are stored in the order they were made.
+  let saving: Promise<unknown> = Promise.resolve();
+
   function choose(change: Partial<ThemeSettings>) {
-    const settings: ThemeSettings = {
-      appearance: theme.appearance,
-      colorTheme: theme.colorTheme,
-      typeTheme: theme.typeTheme,
-      ...change,
-    };
+    const settings: ThemeSettings = { ...currentSettings(), ...change };
     applyTheme(settings);
-    api.setSetting("theme", settings).catch((err) => onError(String(err)));
+    saving = saving.then(() => api.setSetting("theme", settings)).catch((err) => onError(String(err)));
+  }
+
+  // The custom font: typed by the user, applied after a short pause in typing.
+  let customName = $state(theme.customFont);
+  let customTimer: ReturnType<typeof setTimeout> | undefined;
+  let custom = $derived(customTypeTheme(customName));
+  let installed = $derived(fontInstalled(customName));
+
+  function typeCustom(value: string) {
+    customName = value;
+    clearTimeout(customTimer);
+    customTimer = setTimeout(() => choose({ typeTheme: "custom", customFont: cleanFontName(value) }), 400);
   }
 
   const appearances: { id: Appearance; label: string }[] = [
@@ -111,6 +125,41 @@
           <span class="desc">{option.description}</span>
         </button>
       {/each}
+      <div
+        class="card custom"
+        role="radio"
+        tabindex="0"
+        aria-checked={theme.typeTheme === "custom"}
+        class:on={theme.typeTheme === "custom"}
+        onclick={() => choose({ typeTheme: "custom", customFont: cleanFontName(customName) })}
+        onkeydown={(e) => {
+          if (e.key === "Enter" || e.key === " ") choose({ typeTheme: "custom", customFont: cleanFontName(customName) });
+        }}
+      >
+        <span class="specimen">
+          <span class="big" style:font-family={custom.display}>Billy</span>
+          <span class="small" style:font-family={custom.ui}>The quick brown fox reads 1,234 pages.</span>
+        </span>
+        <span class="label">Custom</span>
+        <input
+          class="field"
+          placeholder="Font name, e.g. Georgia"
+          aria-label="Custom font name"
+          spellcheck="false"
+          value={customName}
+          oninput={(e) => typeCustom(e.currentTarget.value)}
+          onclick={(e) => e.stopPropagation()}
+        />
+        <span class="desc" class:warn={customName.trim() !== "" && !installed}>
+          {#if customName.trim() === ""}
+            Any font on this computer
+          {:else if installed}
+            Installed on this computer
+          {:else}
+            Not found; Segoe UI is used instead
+          {/if}
+        </span>
+      </div>
     </div>
   </section>
 
@@ -192,8 +241,21 @@
 
   .cards {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
     gap: 10px;
+  }
+
+  .card.custom {
+    cursor: pointer;
+  }
+
+  .card.custom .field {
+    width: 100%;
+    margin-top: 4px;
+  }
+
+  .desc.warn {
+    color: var(--danger);
   }
 
   .card {

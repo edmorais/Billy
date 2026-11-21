@@ -68,6 +68,20 @@ export const colorThemes: ColorTheme[] = [
     light: { bg: "#ffffff", panel: "#f2f2f2", raised: "#ffffff", fg: "#111111", muted: "#5c5c5c", line: "#dcdcdc", accent: "#c8102e", accentFg: "#ffffff", danger: "#c8102e" },
     dark: { bg: "#0e0e0e", panel: "#171717", raised: "#1f1f1f", fg: "#f2f2f2", muted: "#a3a3a3", line: "#2e2e2e", accent: "#ff5a6a", accentFg: "#160406", danger: "#ff7a7a" },
   },
+  {
+    id: "plum",
+    name: "Plum",
+    description: "Lavender greys and deep violet",
+    light: { bg: "#f6f4f8", panel: "#ebe7f0", raised: "#fdfcfe", fg: "#211c27", muted: "#685f73", line: "#dbd4e3", accent: "#6b3fa0", accentFg: "#ffffff", danger: "#b0303a" },
+    dark: { bg: "#19161d", panel: "#211d27", raised: "#29242f", fg: "#ebe6f1", muted: "#a59bb2", line: "#383141", accent: "#b48ae8", accentFg: "#1a1022", danger: "#ef8089" },
+  },
+  {
+    id: "harbour",
+    name: "Harbour",
+    description: "Sea blues with a teal accent",
+    light: { bg: "#f1f6f7", panel: "#e2ecee", raised: "#fbfdfd", fg: "#142326", muted: "#566b70", line: "#cddcdf", accent: "#0f7c82", accentFg: "#ffffff", danger: "#b3352b" },
+    dark: { bg: "#11191b", panel: "#172124", raised: "#1e2a2d", fg: "#e2eef0", muted: "#8fa7ac", line: "#2a3a3e", accent: "#4fc3c9", accentFg: "#082022", danger: "#f0867c" },
+  },
 ];
 
 const SYSTEM_UI = '"Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif';
@@ -110,10 +124,53 @@ export const typeThemes: TypeTheme[] = [
 export interface ThemeSettings {
   appearance: Appearance;
   colorTheme: string;
+  /** One of `typeThemes`, or "custom" for `customFont`. */
   typeTheme: string;
+  /** A font installed on this computer, used everywhere when `typeTheme` is "custom". */
+  customFont: string;
 }
 
-export const defaultThemeSettings: ThemeSettings = { appearance: "system", colorTheme: "oak", typeTheme: "system" };
+export const defaultThemeSettings: ThemeSettings = {
+  appearance: "system",
+  colorTheme: "oak",
+  typeTheme: "system",
+  customFont: "",
+};
+
+/** Keeps a typed font name safe to put in CSS: no quotes, backslashes or semicolons. */
+export function cleanFontName(name: string): string {
+  return name.replace(/["'\\;{}<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 64);
+}
+
+/** A type theme that uses one font from this computer, falling back to Segoe UI. */
+export function customTypeTheme(name: string): TypeTheme {
+  const clean = cleanFontName(name);
+  const stack = clean ? `"${clean}", ${SYSTEM_UI}` : SYSTEM_UI;
+  return {
+    id: "custom",
+    name: "Custom",
+    description: clean || "A font on this computer",
+    ui: stack,
+    display: stack,
+    cover: stack,
+  };
+}
+
+/** Whether a font is installed, judged by whether text in it measures differently from
+ *  text in two very different fallback fonts. */
+export function fontInstalled(name: string): boolean {
+  const clean = cleanFontName(name);
+  if (!clean) return false;
+  const canvas = document.createElement("canvas").getContext("2d");
+  if (!canvas) return true;
+  const sample = "mmmmmmmmmmlli WQ 1234567890";
+  return ["monospace", "serif"].some((fallback) => {
+    canvas.font = `72px ${fallback}`;
+    const base = canvas.measureText(sample).width;
+    canvas.font = `72px "${clean}", ${fallback}`;
+    return canvas.measureText(sample).width !== base;
+  });
+}
 
 /** The current choices and the resolved light or dark mode. Components read this. */
 export const theme = $state({ ...defaultThemeSettings, mode: "light" as Mode });
@@ -126,6 +183,7 @@ export function colorTheme(id: string): ColorTheme {
 }
 
 export function typeTheme(id: string): TypeTheme {
+  if (id === "custom") return customTypeTheme(theme.customFont);
   return typeThemes.find((t) => t.id === id) ?? typeThemes[0];
 }
 
@@ -184,8 +242,18 @@ export function applyCachedTheme() {
   applyTheme(cached);
   // Follow Windows when the appearance is "system".
   systemDark?.addEventListener("change", () => {
-    if (theme.appearance === "system") applyTheme({ appearance: theme.appearance, colorTheme: theme.colorTheme, typeTheme: theme.typeTheme });
+    if (theme.appearance === "system") applyTheme(currentSettings());
   });
+}
+
+/** The current choices, without the resolved mode. */
+export function currentSettings(): ThemeSettings {
+  return {
+    appearance: theme.appearance,
+    colorTheme: theme.colorTheme,
+    typeTheme: theme.typeTheme,
+    customFont: theme.customFont,
+  };
 }
 
 export function readThemeSettings(raw: Record<string, unknown> | undefined): ThemeSettings {
