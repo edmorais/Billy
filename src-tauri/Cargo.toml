@@ -1,6 +1,6 @@
 [package]
 name = "billy"
-version = "1.0.0-rc"
+version = "1.0.0-rc.2"
 description = "Browse and read the PDFs in your folders"
 authors = ["Eduardo Morais"]
 license = "MIT"
