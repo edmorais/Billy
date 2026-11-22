@@ -181,6 +181,10 @@ export const api = {
   scanningRoots: () => invoke<number[]>("scanning_roots"),
   addRoot: (libraryId: number, path: string) => invoke<Root>("add_root", { libraryId, path }),
   removeRoot: (rootId: number, purge: boolean) => invoke<void>("remove_root", { rootId, purge }),
+  /** Subfolders a library leaves out when it syncs, as absolute paths. */
+  listIgnored: (libraryId: number) => invoke<string[]>("list_ignored", { libraryId }),
+  ignoreFolder: (libraryId: number, path: string) => invoke<string[]>("ignore_folder", { libraryId, path }),
+  unignoreFolder: (libraryId: number, path: string) => invoke<string[]>("unignore_folder", { libraryId, path }),
   prioritizeThumbs: (fileIds: number[]) => invoke<void>("prioritize_thumbs", { fileIds }),
   thumbsRemaining: () => invoke<number>("thumbs_remaining"),
 };

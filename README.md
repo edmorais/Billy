@@ -19,7 +19,7 @@ Billy only reads your folders. It never moves, renames or changes your files, an
 - **Read or unread.** Mark documents as read, and show only unread ones.
 - **Reading.** Billy's reader is the one in Firefox (Mozilla's PDF.js). It reopens each book at the page where you stopped.
 - **Annotating.** Highlight, add notes, draw and sign. Billy keeps your annotations in its own folder, so your PDF stays as it was. You can also export an annotated copy, or save the annotations into the original file.
-- **Staying in sync.** Billy notices new, moved, renamed and deleted files. Turn on Auto-sync for a folder to keep it up to date while Billy runs, or sync by hand.
+- **Staying in sync.** Billy notices new, moved, renamed and deleted files. Turn on Auto-sync for a folder to keep it up to date while Billy runs, or sync by hand. To leave a subfolder out, right-click it and choose **Ignore this folder**; Library settings lists the ignored folders, to bring them back.
 - **Right-click.** Open any document in your usual PDF app, or show it in File Explorer.
 - **Themes.** Light, dark, or follow Windows. Six color themes and several fonts, including any font on your computer.
 

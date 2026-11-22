@@ -94,6 +94,9 @@ pub fn run() {
             commands::scanning_roots,
             commands::add_root,
             commands::remove_root,
+            commands::list_ignored,
+            commands::ignore_folder,
+            commands::unignore_folder,
             commands::prioritize_thumbs,
             commands::thumbs_remaining,
         ])

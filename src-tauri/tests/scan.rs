@@ -447,3 +447,121 @@ fn hidden_folders_are_skipped() {
 
     assert_eq!(report.files, 3);
 }
+
+#[test]
+fn scan_finishes_while_another_connection_writes() {
+    // The thumbnail worker writes to the database while a scan runs. A scan of more than one
+    // batch used to stop with "database is locked" after its first batch.
+    let tree = TempDir::new().unwrap();
+    let data = TempDir::new().unwrap();
+    let books = tree.path().join("Many");
+    for i in 0..1_000 {
+        write_pdf(&books.join(format!("Shelf {}", i / 100)).join(format!("{i}.pdf")), &i.to_string(), 200);
+    }
+    let books = billy_lib::fs_guard::canonical_dir(&books).unwrap();
+    let db_path = data.path().join("billy.db");
+    let mut conn = db::open(&db_path).unwrap();
+    let library = libraries::create_library(&conn, "Many").unwrap();
+    let root = libraries::insert_root(&conn, library.id, &books.to_string_lossy()).unwrap();
+
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let writer = {
+        let stop = stop.clone();
+        let db_path = db_path.clone();
+        std::thread::spawn(move || {
+            let mut other = db::open(&db_path).unwrap();
+            // Retry at once when the database is busy, so this writer gets in between batches.
+            other.busy_handler(Some(|_| true)).unwrap();
+            let mut writes = 0;
+            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                other
+                    .execute("UPDATE files SET thumb_status = 'ok' WHERE id = (SELECT MAX(id) FROM files)", [])
+                    .unwrap();
+                writes += 1;
+            }
+            writes
+        })
+    };
+    let report = scan_root(&mut conn, root.id, &mut |_| {});
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    let writes = writer.join().unwrap();
+    let report = report.unwrap();
+    assert!(writes > 0);
+    assert_eq!(report.files, 1_000);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM entries"), 1_000);
+}
+
+#[test]
+fn write_transactions_wait_for_other_writers_instead_of_failing() {
+    // A deferred transaction that reads, then writes after another connection wrote, fails at
+    // once with "database is locked". `write_tx` takes the lock first, so the other writer waits.
+    let data = TempDir::new().unwrap();
+    let path = data.path().join("billy.db");
+    let mut conn = db::open(&path).unwrap();
+    let library = libraries::create_library(&conn, "A").unwrap();
+
+    let tx = db::write_tx(&mut conn).unwrap();
+    let before: i64 = tx.query_row("SELECT COUNT(*) FROM libraries", [], |r| r.get(0)).unwrap();
+    let other = std::thread::spawn(move || {
+        let other = db::open(&path).unwrap();
+        other.execute("UPDATE libraries SET name = 'B' WHERE id = ?1", [library.id]).unwrap();
+    });
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    tx.execute("INSERT INTO libraries (name, created_at) VALUES ('C', 0)", []).unwrap();
+    tx.commit().unwrap();
+    other.join().unwrap();
+
+    assert_eq!(before, 1);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM libraries"), 2);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM libraries WHERE name = 'B'"), 1);
+}
+
+#[test]
+fn ignored_subfolders_are_left_out_and_come_back() {
+    let mut s = setup();
+    let library = libraries::create_library(&s.conn, "Books").unwrap();
+    let root = add_and_scan(&mut s.conn, library.id, &s.books);
+    let big = file_id(&s.conn, &s.books.join("Sub").join("Deep").join("big.pdf"));
+    marks::set_read(&mut s.conn, library.id, &[big], true).unwrap();
+    assert_eq!(count(&s.conn, "SELECT COUNT(*) FROM entries"), 3);
+
+    // Ignoring Sub leaves out Sub/b.PDF and Sub/Deep/big.pdf, and keeps the read status.
+    let sub = s.books.join("Sub").to_string_lossy().into_owned();
+    assert_eq!(libraries::ignore_folder(&s.conn, library.id, &sub).unwrap(), vec![root]);
+    let report = scan_root(&mut s.conn, root, &mut |_| {}).unwrap();
+    assert_eq!((report.files, report.removed), (1, 2));
+    assert_eq!(count(&s.conn, "SELECT COUNT(*) FROM entries"), 1);
+    assert_eq!(count(&s.conn, "SELECT COUNT(*) FROM read_state WHERE read = 1"), 1);
+    // The folder tree no longer shows the ignored folders.
+    let tree = browse::folder_tree(&s.conn, library.id).unwrap();
+    assert!(tree.iter().all(|n| n.rel_path.is_empty()), "{tree:?}");
+    assert_eq!(libraries::list_ignored(&s.conn, library.id).unwrap(), vec![sub.clone()]);
+
+    // Ignoring is per library: another library with the same folder still has everything.
+    let other = libraries::create_library(&s.conn, "Everything").unwrap();
+    add_and_scan(&mut s.conn, other.id, &s.books);
+    assert_eq!(count(&s.conn, &format!("SELECT COUNT(*) FROM entries WHERE library_id = {}", other.id)), 3);
+
+    // Stop ignoring: the documents come back, read status and all.
+    assert_eq!(libraries::unignore_folder(&s.conn, library.id, &sub).unwrap(), vec![root]);
+    scan_root(&mut s.conn, root, &mut |_| {}).unwrap();
+    assert_eq!(count(&s.conn, &format!("SELECT COUNT(*) FROM entries WHERE library_id = {}", library.id)), 3);
+    assert_eq!(count(&s.conn, &format!("SELECT COUNT(*) FROM read_state WHERE library_id = {} AND read = 1", library.id)), 1);
+}
+
+#[test]
+fn only_subfolders_of_the_library_can_be_ignored() {
+    let mut s = setup();
+    let library = libraries::create_library(&s.conn, "Books").unwrap();
+    add_and_scan(&mut s.conn, library.id, &s.books);
+    let books = s.books.to_string_lossy().into_owned();
+    assert!(libraries::ignore_folder(&s.conn, library.id, &books).is_err());
+    assert!(libraries::ignore_folder(&s.conn, library.id, r"C:\Elsewhere").is_err());
+    // A folder whose name only starts like the root's is not inside it.
+    assert!(libraries::ignore_folder(&s.conn, library.id, &format!(r"{books}2\Sub")).is_err());
+    assert!(libraries::list_ignored(&s.conn, library.id).unwrap().is_empty());
+}
+
+fn file_id(conn: &Connection, path: &Path) -> i64 {
+    conn.query_row("SELECT id FROM files WHERE path = ?1", [path.to_string_lossy()], |r| r.get(0)).unwrap()
+}

@@ -6,7 +6,7 @@
 
 pub mod fingerprint;
 
-use crate::db::{libraries::is_inside, now_ms};
+use crate::db::{libraries::is_inside, now_ms, write_tx};
 use crate::db::libraries;
 use crate::error::Result;
 use crate::fs_guard;
@@ -15,8 +15,11 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-/// Files are committed and progress is reported after every batch of this many PDFs.
+/// Files are committed and progress is reported after every batch of this many PDFs, or
+/// sooner when a batch takes longer than `BATCH_TIME`. The scan holds the write lock while a
+/// batch is open, so the thumbnail worker and the app wait for at most that long.
 const BATCH: u64 = 200;
+const BATCH_TIME: std::time::Duration = std::time::Duration::from_secs(1);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -88,10 +91,16 @@ pub fn scan_root(
     let my_depth = roots.get(&root_id).map(|r| r.depth).unwrap_or(0);
     let mut folder_ids: HashMap<PathBuf, i64> = HashMap::new();
     let mut seen: HashSet<i64> = HashSet::new();
-    let mut tx = conn.transaction()?;
+    let ignored = libraries::ignored_under(conn, root.library_id, &root.path)?;
+    let mut tx = write_tx(conn)?;
     let mut in_batch = 0;
+    let mut batch_started = std::time::Instant::now();
 
-    for item in fs_guard::walk(&root_path) {
+    let skip_dir = |dir: &Path| {
+        let dir = dir.to_string_lossy();
+        ignored.iter().any(|folder| libraries::is_same_or_inside(&dir, folder))
+    };
+    for item in fs_guard::walk(&root_path, skip_dir) {
         let item = match item {
             Ok(item) => item,
             Err(err) => {
@@ -193,10 +202,11 @@ pub fn scan_root(
         report.files += 1;
 
         in_batch += 1;
-        if in_batch >= BATCH {
+        if in_batch >= BATCH || batch_started.elapsed() >= BATCH_TIME {
             tx.commit()?;
-            tx = conn.transaction()?;
+            tx = write_tx(conn)?;
             in_batch = 0;
+            batch_started = std::time::Instant::now();
             progress(&ScanProgress { root_id, files_found: report.files });
         }
     }
@@ -220,9 +230,10 @@ pub fn scan_root(
                 tx.execute("UPDATE files SET missing_since = ?2 WHERE id = ?1", params![file_id, now])?;
                 report.missing += 1;
             }
-        } else if !is_inside(&path, &root.path) || report.errors.is_empty() {
-            // Still on disk, but moved out of this folder or now hidden. When the walk had
-            // errors, Billy may simply have failed to read it, so it is left alone.
+        } else if !is_inside(&path, &root.path) || report.errors.is_empty() || skip_dir(Path::new(&path)) {
+            // Still on disk, but moved out of this folder, now hidden, or in an ignored folder.
+            // When the walk had errors, Billy may simply have failed to read it, so it is
+            // otherwise left alone.
             tx.execute(
                 "DELETE FROM entries WHERE library_id = ?1 AND file_id = ?2",
                 params![root.library_id, file_id],

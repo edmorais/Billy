@@ -48,7 +48,7 @@ pub fn list_missing(conn: &Connection, library_id: i64) -> Result<Vec<MissingFil
 /// that no other library holds is forgotten completely, with its annotations. Returns the
 /// annotated copies that the caller should delete from Billy's data folder.
 pub fn clean_up(conn: &mut Connection, library_id: i64, file_ids: &[i64]) -> Result<Vec<PathBuf>> {
-    let tx = conn.transaction()?;
+    let tx = crate::db::write_tx(conn)?;
     let mut copies = Vec::new();
     for &file_id in file_ids {
         let missing: bool = tx.query_row(

@@ -199,6 +199,53 @@ pub fn purge_orphan_state(conn: &Connection, library_id: i64) -> Result<()> {
     Ok(())
 }
 
+/// Subfolders that a library leaves out when it scans, as absolute paths.
+pub fn list_ignored(conn: &Connection, library_id: i64) -> Result<Vec<String>> {
+    let mut stmt =
+        conn.prepare("SELECT path FROM ignored_folders WHERE library_id = ?1 ORDER BY path COLLATE NOCASE")?;
+    let rows = stmt.query_map([library_id], |r| r.get(0))?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// The ignored folders that sit inside `root_path`, for scanning that root.
+pub fn ignored_under(conn: &Connection, library_id: i64, root_path: &str) -> Result<Vec<String>> {
+    Ok(list_ignored(conn, library_id)?.into_iter().filter(|p| is_inside(p, root_path)).collect())
+}
+
+/// Makes a library leave out a subfolder of one of its folders. Returns the roots that hold
+/// it, which must be scanned again.
+pub fn ignore_folder(conn: &Connection, library_id: i64, path: &str) -> Result<Vec<i64>> {
+    let roots = list_roots(conn, library_id)?;
+    if roots.iter().any(|r| lowercase_path(&r.path) == lowercase_path(path)) {
+        return Err(Error::msg(
+            "That is one of the library's own folders. To leave it out, remove it from the library.",
+        ));
+    }
+    let holders: Vec<i64> = roots.iter().filter(|r| is_inside(path, &r.path)).map(|r| r.id).collect();
+    if holders.is_empty() {
+        return Err(Error::msg("Only subfolders of this library's folders can be ignored."));
+    }
+    conn.execute(
+        "INSERT OR IGNORE INTO ignored_folders (library_id, path, added_at) VALUES (?1, ?2, ?3)",
+        params![library_id, path, now_ms()],
+    )?;
+    Ok(holders)
+}
+
+/// Stops ignoring a subfolder. Returns the roots that hold it, which must be scanned again.
+pub fn unignore_folder(conn: &Connection, library_id: i64, path: &str) -> Result<Vec<i64>> {
+    conn.execute(
+        "DELETE FROM ignored_folders WHERE library_id = ?1 AND path = ?2",
+        params![library_id, path],
+    )?;
+    Ok(list_roots(conn, library_id)?.into_iter().filter(|r| is_inside(path, &r.path)).map(|r| r.id).collect())
+}
+
+/// True when `path` is `folder` or inside it.
+pub fn is_same_or_inside(path: &str, folder: &str) -> bool {
+    lowercase_path(path).starts_with(lowercase_path(folder))
+}
+
 /// Windows paths are case-insensitive, so compare them in lower case.
 fn lowercase_path(path: &str) -> PathBuf {
     PathBuf::from(path.to_lowercase())

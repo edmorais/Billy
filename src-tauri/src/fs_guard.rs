@@ -47,12 +47,19 @@ pub fn canonical_dir(path: &Path) -> io::Result<PathBuf> {
 }
 
 /// Walks a folder tree, skipping hidden and system items, names that start with `.`, and
-/// Office lock files (`~$…`). Symbolic links and junctions are not followed.
-pub fn walk(root: &Path) -> impl Iterator<Item = walkdir::Result<DirEntry>> {
+/// Office lock files (`~$…`). Symbolic links and junctions are not followed. Subfolders for
+/// which `skip_dir` returns true are left out, with everything inside them.
+pub fn walk(
+    root: &Path,
+    mut skip_dir: impl FnMut(&Path) -> bool,
+) -> impl Iterator<Item = walkdir::Result<DirEntry>> {
     WalkDir::new(root)
         .follow_links(false)
         .into_iter()
-        .filter_entry(|entry| entry.depth() == 0 || !is_ignored(entry))
+        .filter_entry(move |entry| {
+            entry.depth() == 0
+                || !(is_ignored(entry) || (entry.file_type().is_dir() && skip_dir(entry.path())))
+        })
 }
 
 fn is_ignored(entry: &DirEntry) -> bool {

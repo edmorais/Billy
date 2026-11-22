@@ -38,12 +38,13 @@
   }
 
   let roots = $state<Root[]>([]);
+  let ignored = $state<string[]>([]);
   let name = $state("");
   let dialog: HTMLDialogElement;
 
   async function load() {
     try {
-      roots = await api.listRoots(library.id);
+      [roots, ignored] = await Promise.all([api.listRoots(library.id), api.listIgnored(library.id)]);
     } catch (err) {
       onError(String(err));
     }
@@ -99,6 +100,41 @@
     try {
       await api.removeRoot(root.id, purge);
       await load();
+      onChanged();
+    } catch (err) {
+      onError(String(err));
+    }
+  }
+
+  /** Where an ignored folder sits: its path inside the library folder that holds it. */
+  function ignoredLabel(path: string): { root: string; rest: string } {
+    const lower = path.toLowerCase();
+    const root = roots
+      .map((r) => r.path)
+      .filter((r) => lower.startsWith(r.toLowerCase() + "\\"))
+      .sort((a, b) => b.length - a.length)[0];
+    return root ? { root, rest: path.slice(root.length + 1) } : { root: "", rest: path };
+  }
+
+  async function ignoreSubfolder() {
+    const path = await open({
+      directory: true,
+      multiple: false,
+      title: `Choose a subfolder for ${library.name} to ignore`,
+      defaultPath: roots[0]?.path,
+    });
+    if (typeof path !== "string") return;
+    try {
+      ignored = await api.ignoreFolder(library.id, path);
+      onChanged();
+    } catch (err) {
+      onError(String(err));
+    }
+  }
+
+  async function stopIgnoring(path: string) {
+    try {
+      ignored = await api.unignoreFolder(library.id, path);
       onChanged();
     } catch (err) {
       onError(String(err));
@@ -185,6 +221,38 @@
     {/if}
   </section>
 
+  {#if roots.length > 0}
+    <section>
+      <div class="section-head">
+        <h3>Ignored folders</h3>
+        <button class="btn" onclick={ignoreSubfolder}><Icon name="eye-off" size={14} /> Ignore a subfolder…</button>
+      </div>
+      {#if ignored.length === 0}
+        <p class="muted hint">
+          None. To leave a subfolder out, right-click it in the sidebar and choose Ignore this folder, or add it here.
+        </p>
+      {:else}
+        <ul>
+          {#each ignored as path (path)}
+            {@const where = ignoredLabel(path)}
+            <li>
+              <Icon name="eye-off" />
+              <div class="root">
+                <span class="path">{where.rest}</span>
+                {#if where.root}<span class="muted">in {where.root}</span>{/if}
+              </div>
+              <button class="btn" onclick={() => stopIgnoring(path)}>Stop ignoring</button>
+            </li>
+          {/each}
+        </ul>
+        <p class="hint muted">
+          Billy leaves these folders out when it syncs. Favorites and read status are kept, in case you stop ignoring
+          one.
+        </p>
+      {/if}
+    </section>
+  {/if}
+
   {#if missingCount > 0}
     <section class="missing">
       <span>
@@ -203,6 +271,8 @@
 <style>
   dialog {
     width: min(640px, calc(100vw - 48px));
+    max-height: calc(100vh - 48px);
+    overflow: auto;
     padding: 0;
     border: 1px solid var(--line);
     border-radius: 10px;

@@ -119,6 +119,7 @@ function makeSamplePdf(): Uint8Array {
 const samplePdf = makeSamplePdf();
 
 const appSettings: Record<string, unknown> = {};
+let ignored: string[] = [];
 
 export function installMock() {
   mockWindows("main");
@@ -235,6 +236,14 @@ export function installMock() {
           return null;
         case "list_roots":
           return roots;
+        case "list_ignored":
+          return [...ignored];
+        case "ignore_folder":
+          if (!ignored.includes(a.path)) ignored = [...ignored, a.path].sort();
+          return [...ignored];
+        case "unignore_folder":
+          ignored = ignored.filter((p) => p !== a.path);
+          return [...ignored];
         case "scanning_roots":
           return [];
         case "prioritize_thumbs":

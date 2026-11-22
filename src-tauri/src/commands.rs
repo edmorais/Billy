@@ -320,6 +320,34 @@ pub fn add_root(app: AppHandle, state: State<AppState>, library_id: i64, path: S
     Ok(root)
 }
 
+/// Subfolders the library leaves out when it scans.
+#[tauri::command]
+pub fn list_ignored(state: State<AppState>, library_id: i64) -> Result<Vec<String>> {
+    libraries::list_ignored(&state.db(), library_id)
+}
+
+/// Leaves a subfolder out of a library, and syncs the folders that hold it so its documents
+/// leave the library. Their favorites and read status are kept, in case it comes back.
+#[tauri::command]
+pub fn ignore_folder(app: AppHandle, state: State<AppState>, library_id: i64, path: String) -> Result<Vec<String>> {
+    let path = fs_guard::canonical_dir(&PathBuf::from(&path)).map(|p| p.to_string_lossy().into_owned()).unwrap_or(path);
+    let holders = libraries::ignore_folder(&state.db(), library_id, &path)?;
+    for root_id in holders {
+        spawn_scan(app.clone(), root_id);
+    }
+    libraries::list_ignored(&state.db(), library_id)
+}
+
+/// Stops ignoring a subfolder, and syncs the folders that hold it so its documents come back.
+#[tauri::command]
+pub fn unignore_folder(app: AppHandle, state: State<AppState>, library_id: i64, path: String) -> Result<Vec<String>> {
+    let holders = libraries::unignore_folder(&state.db(), library_id, &path)?;
+    for root_id in holders {
+        spawn_scan(app.clone(), root_id);
+    }
+    libraries::list_ignored(&state.db(), library_id)
+}
+
 /// Removes a folder from a library. With `purge`, also deletes favorites and read status for
 /// documents that are no longer in the library.
 #[tauri::command]

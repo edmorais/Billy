@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 /// Pins or unpins documents in a library. Files that are not in the library are ignored.
 pub fn set_favorite(conn: &mut Connection, library_id: i64, file_ids: &[i64], favorite: bool) -> Result<()> {
-    let tx = conn.transaction()?;
+    let tx = crate::db::write_tx(conn)?;
     let now = now_ms();
     for &file_id in file_ids {
         if favorite {
@@ -30,7 +30,7 @@ pub fn set_favorite(conn: &mut Connection, library_id: i64, file_ids: &[i64], fa
 
 /// Marks documents in a library as read or unread. Files that are not in the library are ignored.
 pub fn set_read(conn: &mut Connection, library_id: i64, file_ids: &[i64], read: bool) -> Result<()> {
-    let tx = conn.transaction()?;
+    let tx = crate::db::write_tx(conn)?;
     let now = now_ms();
     for &file_id in file_ids {
         tx.execute(

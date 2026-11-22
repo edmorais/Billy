@@ -504,6 +504,9 @@
           { label: "Open", icon: "folder", action: () => navigate(folder.id) },
           { label: "Open in File Explorer", icon: "folder-open", disabled: folder.offline, action: () => api.openFolder(folder.id).catch(showError) },
           { label: "Sync now", icon: "sync", action: () => syncFolder(folder) },
+          ...(folder.relPath
+            ? ([{ label: "Ignore this folder", icon: "eye-off", action: () => ignoreFolder(folder) }] as MenuEntry[])
+            : []),
           "separator",
           { label: "Copy path", icon: "copy", action: () => copyText(folderPath(folder)) },
         ],
@@ -564,6 +567,21 @@
         },
       ],
     };
+  }
+
+  /** Leaves a subfolder out of the library. Library settings lists it, to bring it back. */
+  async function ignoreFolder(folder: FolderNode) {
+    if (libraryId === null) return;
+    try {
+      await api.ignoreFolder(libraryId, folderPath(folder));
+      scanning[folder.rootId] = 0;
+      // Leave the folder if it, or a folder inside it, is open.
+      if (ancestry.some((f) => f.id === folder.id)) navigate(folder.parentId);
+      rootsVersion++;
+      flash(`Ignoring "${folder.name}". To bring it back, open Library settings.`);
+    } catch (err) {
+      showError(err);
+    }
   }
 
   /** Syncs the root folder that holds this folder. */
