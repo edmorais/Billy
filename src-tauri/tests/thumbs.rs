@@ -172,19 +172,59 @@ fn render_speed() {
 }
 
 #[test]
-fn unused_covers_are_removed_and_nothing_else() {
+fn only_covers_of_forgotten_files_are_removed() {
     let data = TempDir::new().unwrap();
     let conn = db::open(&data.path().join("billy.db")).unwrap();
-    conn.execute("INSERT INTO files (path, size, mtime, fingerprint) VALUES ('x.pdf', 1, 0, '1f-abc')", []).unwrap();
+    conn.execute("INSERT INTO files (path, size, mtime, fingerprint) VALUES ('a.pdf', 1, 0, '1f-abc')", []).unwrap();
     let dir = data.path().join("thumbs");
     fs::create_dir_all(&dir).unwrap();
-    for name in ["1f-abc.jpg", "2e-dead.jpg", "2e-dead.tmp", "notes.txt", "Not a cover.jpg"] {
+    for name in ["1f-abc.jpg", "2e-dead.jpg", "3d-beef.jpg"] {
         fs::write(dir.join(name), b"x").unwrap();
     }
-    assert_eq!(thumbs::remove_unused_covers(&conn, &dir).unwrap(), 1);
+    // 1f-abc is still used; 2e-dead was forgotten; 3d-beef is unknown and is left alone,
+    // because the database and the cover folder may not match.
+    let forgotten = ["1f-abc".to_string(), "2e-dead".to_string(), "..\\x".to_string()];
+    assert_eq!(thumbs::remove_covers(&conn, &dir, &forgotten).unwrap(), 1);
     let mut left: Vec<String> = fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
     left.sort();
-    assert_eq!(left, ["1f-abc.jpg", "2e-dead.tmp", "Not a cover.jpg", "notes.txt"]);
-    // No cover folder yet: nothing to do.
-    assert_eq!(thumbs::remove_unused_covers(&conn, &data.path().join("none")).unwrap(), 0);
+    assert_eq!(left, ["1f-abc.jpg", "3d-beef.jpg"]);
+}
+
+#[test]
+fn missing_cover_files_are_made_again() {
+    let tree = TempDir::new().unwrap();
+    let data = TempDir::new().unwrap();
+    for (name, title) in [("a.pdf", "A"), ("b.pdf", "B")] {
+        write_pdf(&tree.path().join(name), title, "Someone", 1);
+    }
+    let books = billy_lib::fs_guard::canonical_dir(tree.path()).unwrap();
+    let mut conn = db::open(&data.path().join("billy.db")).unwrap();
+    let thumbs_dir = data.path().join("thumbs");
+    let library = libraries::create_library(&conn, "Books").unwrap();
+    let root = libraries::insert_root(&conn, library.id, &books.to_string_lossy()).unwrap();
+    scan_root(&mut conn, root.id, &mut |_| {}).unwrap();
+    let pdfium = thumbs::pdfium(&pdfium_dir()).unwrap();
+    while let Some(id) = thumbs::next_pending(&conn).unwrap() {
+        thumbs::process(&conn, pdfium, &thumbs_dir, id).unwrap();
+    }
+    assert_eq!(thumbs::repair_missing_covers(&mut conn, &thumbs_dir, None).unwrap(), 0);
+
+    // A cover file disappears: the next check queues that document, and only that one.
+    let (a, fp): (i64, String) = conn
+        .query_row("SELECT id, fingerprint FROM files WHERE path LIKE '%a.pdf'", [], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    fs::remove_file(thumbs::thumb_path(&thumbs_dir, &fp)).unwrap();
+    assert_eq!(thumbs::repair_missing_covers(&mut conn, &thumbs_dir, Some(&[a + 1])).unwrap(), 0);
+    assert_eq!(thumbs::repair_missing_covers(&mut conn, &thumbs_dir, None).unwrap(), 1);
+    assert_eq!(thumbs::next_pending(&conn).unwrap(), Some(a));
+    thumbs::process(&conn, pdfium, &thumbs_dir, a).unwrap();
+    assert!(thumbs::thumb_path(&thumbs_dir, &fp).exists());
+
+    // Rebuilding queues every document in the library.
+    assert_eq!(thumbs::rebuild_covers(&conn, library.id).unwrap(), 2);
+    assert_eq!(count_pending(&conn), 2);
+}
+
+fn count_pending(conn: &rusqlite::Connection) -> i64 {
+    conn.query_row("SELECT COUNT(*) FROM files WHERE thumb_status = 'pending'", [], |r| r.get(0)).unwrap()
 }

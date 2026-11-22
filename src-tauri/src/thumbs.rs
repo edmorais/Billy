@@ -155,32 +155,57 @@ pub fn process(conn: &Connection, pdfium: &Pdfium, thumbs_dir: &Path, file_id: i
     Ok(Some(update))
 }
 
-/// Deletes the covers in `thumbs_dir` that no file record uses any more, for example after a
-/// library was deleted. Only files named like a cover (`<fingerprint>.jpg`) are touched.
-/// Returns how many were deleted.
-pub fn remove_unused_covers(conn: &Connection, thumbs_dir: &Path) -> Result<usize> {
-    // List the folder before reading the records. A cover is written after its record, so a
-    // cover in this listing whose record is still there afterwards is kept.
-    let names: Vec<String> = match std::fs::read_dir(thumbs_dir) {
-        Ok(entries) => entries
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
-            .filter_map(|e| e.file_name().into_string().ok())
-            .filter(|name| name.strip_suffix(".jpg").is_some_and(is_fingerprint))
-            .collect(),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(0),
-        Err(err) => return Err(err.into()),
-    };
-    let mut stmt = conn.prepare("SELECT fingerprint FROM files")?;
-    let known: std::collections::HashSet<String> =
-        stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+/// Deletes the covers of these fingerprints, unless a file record still uses one. Only the
+/// covers of files Billy has just forgotten are passed here. Covers Billy does not recognize
+/// are never deleted, because the database and the cover folder may not match (for example
+/// when another app gives Billy a private copy of its data folder).
+pub fn remove_covers(conn: &Connection, thumbs_dir: &Path, fingerprints: &[String]) -> Result<usize> {
+    let mut used = conn.prepare("SELECT EXISTS (SELECT 1 FROM files WHERE fingerprint = ?1)")?;
     let mut removed = 0;
-    for name in names {
-        if !known.contains(&name[..name.len() - 4]) && std::fs::remove_file(thumbs_dir.join(&name)).is_ok() {
+    for fp in fingerprints {
+        if !is_fingerprint(fp) || used.query_row([fp], |r| r.get::<_, bool>(0))? {
+            continue;
+        }
+        if std::fs::remove_file(thumb_path(thumbs_dir, fp)).is_ok() {
             removed += 1;
         }
     }
     Ok(removed)
+}
+
+/// Finds documents whose cover was made but whose cover file is gone, and queues them to have
+/// it made again. `file_ids` limits the check to those files; `None` checks every file.
+/// Returns how many were queued.
+pub fn repair_missing_covers(conn: &mut Connection, thumbs_dir: &Path, file_ids: Option<&[i64]>) -> Result<usize> {
+    let candidates: Vec<i64> = {
+        let mut stmt = conn.prepare("SELECT id, fingerprint FROM files WHERE thumb_status = 'ok'")?;
+        stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .filter(|(id, _)| file_ids.is_none_or(|ids| ids.contains(id)))
+            .filter(|(_, fp)| !thumb_path(thumbs_dir, fp).exists())
+            .map(|(id, _)| id)
+            .collect()
+    };
+    if candidates.is_empty() {
+        return Ok(0);
+    }
+    let tx = crate::db::write_tx(conn)?;
+    for id in &candidates {
+        tx.execute("UPDATE files SET thumb_status = 'pending' WHERE id = ?1 AND thumb_status = 'ok'", [id])?;
+    }
+    tx.commit()?;
+    Ok(candidates.len())
+}
+
+/// Queues every document in a library to have its cover (and page count, title and author)
+/// made again. Returns how many were queued.
+pub fn rebuild_covers(conn: &Connection, library_id: i64) -> Result<usize> {
+    Ok(conn.execute(
+        "UPDATE files SET thumb_status = 'pending'
+         WHERE id IN (SELECT file_id FROM entries WHERE library_id = ?1)",
+        [library_id],
+    )?)
 }
 
 /// A fingerprint as Billy writes them: hex digits and dashes.
@@ -298,6 +323,11 @@ pub fn serve(thumbs_dir: &Path, uri_path: &str) -> tauri::http::Response<Vec<u8>
             .header(header::CACHE_CONTROL, "max-age=31536000, immutable")
             .body(bytes)
             .unwrap(),
-        None => Response::builder().status(StatusCode::NOT_FOUND).body(Vec::new()).unwrap(),
+        // Not cached, so the cover shows once it has been made (again).
+        None => Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .header(header::CACHE_CONTROL, "no-store")
+            .body(Vec::new())
+            .unwrap(),
     }
 }

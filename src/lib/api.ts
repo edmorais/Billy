@@ -186,6 +186,10 @@ export const api = {
   ignoreFolder: (libraryId: number, path: string) => invoke<string[]>("ignore_folder", { libraryId, path }),
   unignoreFolder: (libraryId: number, path: string) => invoke<string[]>("unignore_folder", { libraryId, path }),
   prioritizeThumbs: (fileIds: number[]) => invoke<void>("prioritize_thumbs", { fileIds }),
+  /** Makes again the covers of these documents whose cover file is missing. Returns how many. */
+  repairCovers: (fileIds: number[]) => invoke<number>("repair_covers", { fileIds }),
+  /** Makes the covers of every document in a library again. Returns how many. */
+  rebuildCovers: (libraryId: number) => invoke<number>("rebuild_covers", { libraryId }),
   thumbsRemaining: () => invoke<number>("thumbs_remaining"),
 };
 

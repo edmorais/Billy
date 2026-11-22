@@ -2,12 +2,31 @@
   // A document's cover: the rendered first page once it exists, otherwise a placeholder
   // drawn from the document's name.
   import { thumbUrl, type Doc } from "$lib/api";
+  import { remade, repairCover } from "$lib/covers.svelte";
   import { displayName } from "$lib/view";
 
   let { doc, small = false }: { doc: Doc; small?: boolean } = $props();
 
   let failed = $state(false);
+  /** The cover file was missing and is being made again. */
+  let repairing = $state(false);
+  let version = $derived(remade[doc.fileId] ?? 0);
   let showImage = $derived(doc.thumbStatus === "ok" && !failed);
+
+  // Try the image again whenever the cover is (re)made.
+  $effect(() => {
+    void doc.fingerprint;
+    void doc.thumbStatus;
+    void version;
+    failed = false;
+    repairing = false;
+  });
+
+  async function onError() {
+    failed = true;
+    const fileId = doc.fileId;
+    if ((await repairCover(fileId)) && fileId === doc.fileId) repairing = true;
+  }
 
   function hue(text: string): number {
     let h = 0;
@@ -23,18 +42,18 @@
   <img
     class="thumb"
     class:small
-    src={thumbUrl(doc.fingerprint)}
+    src={version ? `${thumbUrl(doc.fingerprint)}?v=${version}` : thumbUrl(doc.fingerprint)}
     alt=""
     loading="lazy"
     decoding="async"
     draggable="false"
-    onerror={() => (failed = true)}
+    onerror={onError}
   />
 {:else}
   <div
     class="cover"
     class:small
-    class:pending={doc.thumbStatus === "pending"}
+    class:pending={doc.thumbStatus === "pending" || repairing}
     style:--h={h}
     title={doc.thumbStatus === "error" ? "Billy could not read this PDF's first page" : undefined}
   >

@@ -54,26 +54,54 @@ pub fn delete_library(app: AppHandle, state: State<AppState>, id: i64) -> Result
         state.watcher.unwatch(root.id);
     }
     libraries::delete_library(&db, id)?;
-    spawn_cleanup(app);
+    spawn_cleanup(app, false);
     Ok(())
 }
 
 /// In the background: forgets files that no library uses any more, and deletes their covers.
-/// Run at startup and after documents leave the library for good.
-pub fn spawn_cleanup(app: AppHandle) {
+/// Run after documents leave the library for good. With `repair` (at startup), also queues
+/// documents whose cover file has gone missing to have it made again.
+pub fn spawn_cleanup(app: AppHandle, repair: bool) {
     std::thread::spawn(move || {
         let state = app.state::<AppState>();
-        let result = db::open(&state.db_path).and_then(|conn| {
-            let files = libraries::forget_unused_files(&conn)?;
-            let covers = crate::thumbs::remove_unused_covers(&conn, &state.thumbs_dir)?;
-            Ok((files, covers))
+        let result = db::open(&state.db_path).and_then(|mut conn| {
+            let forgotten = libraries::forget_unused_files(&conn)?;
+            let covers = crate::thumbs::remove_covers(&conn, &state.thumbs_dir, &forgotten)?;
+            let repaired =
+                if repair { crate::thumbs::repair_missing_covers(&mut conn, &state.thumbs_dir, None)? } else { 0 };
+            Ok((forgotten.len(), covers, repaired))
         });
         match result {
-            Ok((0, 0)) => {}
-            Ok((files, covers)) => eprintln!("cleanup: forgot {files} unused files, deleted {covers} covers"),
+            Ok((0, 0, 0)) => {}
+            Ok((files, covers, repaired)) => {
+                eprintln!("cleanup: forgot {files} unused files, deleted {covers} covers, {repaired} covers to make again");
+                if repaired > 0 {
+                    state.thumbs.wake();
+                }
+            }
             Err(err) => eprintln!("cleanup failed: {err}"),
         }
     });
+}
+
+/// Makes again the covers of these documents whose cover file has gone missing, for example
+/// when the UI could not load them. Returns how many were queued.
+#[tauri::command]
+pub fn repair_covers(state: State<AppState>, file_ids: Vec<i64>) -> Result<usize> {
+    let queued = crate::thumbs::repair_missing_covers(&mut state.db(), &state.thumbs_dir, Some(&file_ids))?;
+    if queued > 0 {
+        state.thumbs.prioritize(&file_ids);
+        state.thumbs.wake();
+    }
+    Ok(queued)
+}
+
+/// Makes the covers of every document in a library again. Returns how many were queued.
+#[tauri::command]
+pub fn rebuild_covers(state: State<AppState>, library_id: i64) -> Result<usize> {
+    let queued = crate::thumbs::rebuild_covers(&state.db(), library_id)?;
+    state.thumbs.wake();
+    Ok(queued)
 }
 
 #[tauri::command]
@@ -269,7 +297,7 @@ pub fn clean_up_missing(app: AppHandle, state: State<AppState>, library_id: i64,
             let _ = std::fs::remove_file(copy);
         }
     }
-    spawn_cleanup(app);
+    spawn_cleanup(app, false);
     Ok(())
 }
 
@@ -386,7 +414,7 @@ pub async fn remove_root(app: AppHandle, root_id: i64, purge: bool) -> Result<()
         if purge {
             libraries::purge_orphan_state(&conn, removed.library_id)?;
         }
-        spawn_cleanup(app.clone());
+        spawn_cleanup(app.clone(), false);
         Ok(())
     })
     .await

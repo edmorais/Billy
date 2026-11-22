@@ -35,8 +35,18 @@ pub fn run() {
         .setup(|app| {
             // Billy's data lives in %APPDATA%\Billy and its cache in %LOCALAPPDATA%\Billy,
             // never in a library folder.
-            let db_path = app.path().data_dir()?.join("Billy").join("billy.db");
-            let thumbs_dir = app.path().local_data_dir()?.join("Billy").join("thumbs");
+            // BILLY_DATA_DIR puts both in one folder instead, to try a build without touching
+            // your own libraries.
+            let (db_path, thumbs_dir) = match std::env::var_os("BILLY_DATA_DIR") {
+                Some(dir) => {
+                    let dir = std::path::PathBuf::from(dir);
+                    (dir.join("billy.db"), dir.join("thumbs"))
+                }
+                None => (
+                    app.path().data_dir()?.join("Billy").join("billy.db"),
+                    app.path().local_data_dir()?.join("Billy").join("thumbs"),
+                ),
+            };
             let conn = db::open(&db_path)?;
             let sync_handle = app.handle().clone();
             let watcher = watch::SyncWatcher::new(move |root_id| commands::spawn_scan(sync_handle.clone(), root_id));
@@ -44,7 +54,7 @@ pub fn run() {
             let queue = state.thumbs.clone();
             app.manage(state);
             commands::start_auto_sync(app.handle().clone());
-            commands::spawn_cleanup(app.handle().clone());
+            commands::spawn_cleanup(app.handle().clone(), true);
 
             let handle = app.handle().clone();
             let error_handle = app.handle().clone();
@@ -96,6 +106,8 @@ pub fn run() {
             commands::add_root,
             commands::remove_root,
             commands::list_ignored,
+            commands::repair_covers,
+            commands::rebuild_covers,
             commands::ignore_folder,
             commands::unignore_folder,
             commands::prioritize_thumbs,

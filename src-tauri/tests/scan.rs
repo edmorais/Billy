@@ -577,12 +577,12 @@ fn deleting_a_library_forgets_files_no_library_uses() {
 
     // B still holds every file.
     libraries::delete_library(&s.conn, a.id).unwrap();
-    assert_eq!(libraries::forget_unused_files(&s.conn).unwrap(), 0);
+    assert!(libraries::forget_unused_files(&s.conn).unwrap().is_empty());
     assert_eq!(count(&s.conn, "SELECT COUNT(*) FROM files"), 3);
 
     // Nothing holds them now.
     libraries::delete_library(&s.conn, b.id).unwrap();
-    assert_eq!(libraries::forget_unused_files(&s.conn).unwrap(), 3);
+    assert_eq!(libraries::forget_unused_files(&s.conn).unwrap().len(), 3);
     assert_eq!(count(&s.conn, "SELECT COUNT(*) FROM files"), 0);
 }
 
@@ -604,7 +604,7 @@ fn files_with_marks_or_annotations_are_kept() {
     // Removing the folder but keeping favorites and read status: a.pdf (read) and b.PDF
     // (annotated) stay; big.pdf is forgotten.
     libraries::remove_root(&s.conn, root).unwrap();
-    assert_eq!(libraries::forget_unused_files(&s.conn).unwrap(), 1);
+    assert_eq!(libraries::forget_unused_files(&s.conn).unwrap().len(), 1);
     assert_eq!(count(&s.conn, "SELECT COUNT(*) FROM files"), 2);
 
     // Adding the folder again brings back the read status.

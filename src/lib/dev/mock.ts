@@ -248,6 +248,10 @@ export function installMock() {
           return [];
         case "prioritize_thumbs":
           return null;
+        case "repair_covers":
+          return 0;
+        case "rebuild_covers":
+          return docs.length;
         case "thumbs_remaining":
           return 0;
         default:

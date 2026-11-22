@@ -16,6 +16,7 @@
   import Reader from "$lib/components/Reader.svelte";
   import AppSettings from "$lib/components/AppSettings.svelte";
   import TitleBar from "$lib/components/TitleBar.svelte";
+  import { coversMade } from "$lib/covers.svelte";
   import { applyTheme, readThemeSettings } from "$lib/theme.svelte";
   import { initUpdates, installUpdate, updates } from "$lib/updates.svelte";
   import { display, initDisplay, setSidebarWidth, SIDEBAR_DEFAULT } from "$lib/display.svelte";
@@ -104,6 +105,7 @@
 
   function applyThumbUpdates(updates: { fileId: number; status: "ok" | "error"; pages: number | null; title: string | null; author: string | null }[]) {
     if (updates.length === 0) return;
+    coversMade(updates.filter((u) => u.status === "ok").map((u) => u.fileId));
     const byId = new Map(updates.map((u) => [u.fileId, u]));
     for (const doc of [...docs, ...shelfAll]) {
       const u = byId.get(doc.fileId);

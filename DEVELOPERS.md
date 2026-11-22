@@ -45,6 +45,14 @@ npm run tauri dev
 
 To work on the UI in a normal browser, run `npm run dev` and open http://localhost:1420. Outside Tauri, a fake backend with 5,000 books (`src/lib/dev/mock.ts`) answers the UI's calls. Add `?single` for a library with one folder, or `?big` for a large sample PDF in the reader.
 
+To try a build without touching your own libraries, set `BILLY_DATA_DIR` to an empty folder before starting Billy. It then keeps its database and covers there:
+
+```powershell
+$env:BILLY_DATA_DIR = "$env:TEMP\billy-test"; npm run tauri dev
+```
+
+Set it whenever Billy is started from inside a packaged app (an MSIX app, such as some terminals and AI assistants). Windows gives such apps a private copy of `%APPDATA%` that falls behind your real data, while covers in `%LOCALAPPDATA%` may still be the real ones.
+
 ## Testing
 
 ```powershell

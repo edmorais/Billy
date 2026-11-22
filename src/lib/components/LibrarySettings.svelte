@@ -141,6 +141,16 @@
     }
   }
 
+  let rebuilding = $state<number | null>(null);
+
+  async function rebuildCovers() {
+    try {
+      rebuilding = await api.rebuildCovers(library.id);
+    } catch (err) {
+      onError(String(err));
+    }
+  }
+
   async function deleteLibrary() {
     const confirmed = await ask(
       `Delete the library "${library.name}"?\n\nBilly will forget its folders, favorites and read status. Your files and folders are not touched.`,
@@ -250,6 +260,25 @@
           one.
         </p>
       {/if}
+    </section>
+  {/if}
+
+  {#if roots.length > 0}
+    <section>
+      <div class="section-head">
+        <h3>Covers</h3>
+        <button class="btn" onclick={rebuildCovers} disabled={rebuilding !== null}>
+          <Icon name="sync" size={14} /> Rebuild covers
+        </button>
+      </div>
+      <p class="muted hint">
+        {#if rebuilding !== null}
+          Making {rebuilding} {rebuilding === 1 ? "cover" : "covers"} again, in the background.
+        {:else}
+          Makes the covers of this library's documents again, and reads their page count, title and author. Billy
+          already remakes covers that have gone missing by itself.
+        {/if}
+      </p>
     </section>
   {/if}
 
