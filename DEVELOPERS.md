@@ -99,11 +99,11 @@ $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content "$env:USERPROFILE\.tauri\billy.key"
 2. Commit, then tag the commit with the same version and push the tag:
 
 ```powershell
-git tag v0.9.5
+git tag v0.9.6
 ```
 
 ```powershell
-git push origin v0.9.5
+git push origin v0.9.6
 ```
 
 The Release workflow (`.github/workflows/release.yml`) checks that the tag matches the version, runs the tests, builds and signs Billy, and publishes a GitHub Release with the installer and `latest.json`.
