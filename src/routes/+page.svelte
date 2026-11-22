@@ -17,6 +17,7 @@
   import AppSettings from "$lib/components/AppSettings.svelte";
   import TitleBar from "$lib/components/TitleBar.svelte";
   import { coversMade } from "$lib/covers.svelte";
+  import { modal } from "$lib/modal.svelte";
   import { applyTheme, readThemeSettings } from "$lib/theme.svelte";
   import { initUpdates, installUpdate, updates } from "$lib/updates.svelte";
   import { display, initDisplay, setSidebarWidth, SIDEBAR_DEFAULT } from "$lib/display.svelte";
@@ -620,6 +621,7 @@
     if (reading) return; // The reader handles its own keys.
     const target = event.target as HTMLElement;
     const typing = target.matches?.("input, select, textarea") ?? false;
+    if (modal.open > 0) return; // A dialog handles its own keys.
     if (event.ctrlKey && event.key.toLowerCase() === "f") {
       event.preventDefault();
       searchInput?.focus();
@@ -692,9 +694,15 @@
   />
 {/if}
 
-<TitleBar reading={reading !== null} showSearch={library !== null && reading === null} bind:search bind:searchInput />
+<TitleBar
+  reading={reading !== null}
+  showSearch={library !== null && reading === null}
+  searchDisabled={modal.open > 0}
+  bind:search
+  bind:searchInput
+/>
 
-<div class="app" class:resizing>
+<div class="app" class:resizing inert={modal.open > 0}>
   <!-- A focusable separator with a value is the ARIA pattern for a resizable splitter, so it
        may take focus and keys, although the checker counts separators as non-interactive. -->
   <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
@@ -831,6 +839,10 @@
     </footer>
   </main>
 </div>
+
+{#if modal.open > 0}
+  <div class="modal-backdrop"></div>
+{/if}
 
 {#if showSettings && library}
   <LibrarySettings

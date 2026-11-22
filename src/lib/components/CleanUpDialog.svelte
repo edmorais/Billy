@@ -2,6 +2,7 @@
   // Lists files that disappeared from disk and, after the user confirms, forgets them.
   import { api, type Library, type MissingFile } from "$lib/api";
   import { formatDate } from "$lib/view";
+  import { openDialog } from "$lib/modal.svelte";
   import Icon from "./Icon.svelte";
 
   interface Props {
@@ -21,8 +22,9 @@
 
   let withState = $derived(files.filter((f) => chosen.has(f.fileId) && (f.favorite || f.read || f.annotated)).length);
 
+  $effect(() => openDialog(dialog));
+
   $effect(() => {
-    dialog.showModal();
     api.listMissing(library.id).then(
       (list) => {
         files = list;
@@ -115,9 +117,6 @@
     box-shadow: 0 12px 40px rgb(0 0 0 / 0.3);
   }
 
-  dialog::backdrop {
-    background: rgb(0 0 0 / 0.35);
-  }
 
   header,
   footer {

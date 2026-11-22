@@ -9,11 +9,19 @@
     reading?: boolean;
     /** Shows the file-name search, just before the window buttons. */
     showSearch?: boolean;
+    /** Greys out the search, for example while a dialog is open. */
+    searchDisabled?: boolean;
     search?: string;
     searchInput?: HTMLInputElement;
   }
 
-  let { reading = false, showSearch = false, search = $bindable(""), searchInput = $bindable() }: Props = $props();
+  let {
+    reading = false,
+    showSearch = false,
+    searchDisabled = false,
+    search = $bindable(""),
+    searchInput = $bindable(),
+  }: Props = $props();
 
   const win = getCurrentWindow();
   let maximized = $state(false);
@@ -48,7 +56,7 @@
   </div>
   <div class="rest" data-tauri-drag-region></div>
   {#if showSearch}
-    <label class="search">
+    <label class="search" class:disabled={searchDisabled} inert={searchDisabled}>
       <Icon name="search" size={14} />
       <input
         bind:this={searchInput}
@@ -160,6 +168,10 @@
     background: var(--raised);
     color: var(--muted);
     user-select: text;
+  }
+
+  .search.disabled {
+    opacity: 0.45;
   }
 
   .search:focus-within {

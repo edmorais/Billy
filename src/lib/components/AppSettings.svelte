@@ -1,5 +1,11 @@
+<script lang="ts" module>
+  // The section last shown, so the dialog opens where it was left during this session.
+  let lastPage = "appearance";
+</script>
+
 <script lang="ts">
   // App-wide settings: appearance, color theme and type theme. Changes apply at once.
+  import { openDialog } from "$lib/modal.svelte";
   import { api } from "$lib/api";
   import {
     applyTheme,
@@ -14,6 +20,7 @@
     type ThemeSettings,
   } from "$lib/theme.svelte";
   import Icon from "./Icon.svelte";
+  import SideNav, { type NavPage } from "./SideNav.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { checkForUpdates, installUpdate, setAutoUpdates, updates } from "$lib/updates.svelte";
   import { formatDate } from "$lib/view";
@@ -30,9 +37,17 @@
 
   let dialog: HTMLDialogElement;
 
+  const pages: NavPage[] = [
+    { id: "appearance", label: "Appearance", icon: "palette" },
+    { id: "updates", label: "Updates", icon: "sync" },
+    { id: "about", label: "About", icon: "info" },
+  ];
+  let page = $state(lastPage);
   $effect(() => {
-    dialog.showModal();
+    lastPage = page;
   });
+
+  $effect(() => openDialog(dialog));
 
   // Saves run one after another, so quick changes are stored in the order they were made.
   let saving: Promise<unknown> = Promise.resolve();
@@ -68,10 +83,14 @@
     <button class="icon-btn" aria-label="Close" onclick={() => dialog.close()}><Icon name="x" /></button>
   </header>
 
-  <div class="body">
+  <div class="layout">
+  <SideNav {pages} bind:current={page} label="Settings sections" />
+  <div class="body" role="tabpanel" id="panel-{page}" aria-labelledby="tab-{page}" tabindex="-1">
+  {#if page === "appearance"}
+  <div class="row">
   <section>
-    <h3>Appearance</h3>
-    <div class="segmented" role="radiogroup" aria-label="Appearance">
+    <h3>Mode</h3>
+    <div class="segmented" role="radiogroup" aria-label="Mode">
       {#each appearances as option (option.id)}
         <button
           role="radio"
@@ -102,6 +121,7 @@
     </div>
     <p class="hint">Makes everything in Billy larger or smaller, including the reader's toolbar.</p>
   </section>
+  </div>
 
   <section>
     <h3>Colors</h3>
@@ -192,6 +212,7 @@
     </div>
   </section>
 
+  {:else if page === "updates"}
   <section>
     <h3>Updates</h3>
     <label class="check">
@@ -223,6 +244,7 @@
     </div>
   </section>
 
+  {:else}
   <section class="about">
     <h3>About</h3>
     <div class="about-row">
@@ -230,6 +252,7 @@
       <div>
         <div class="display about-name">Billy {version}</div>
         <div class="hint inline">Your PDF bookshelves. Free software under the MIT License.</div>
+        <div class="hint inline">By Eduardo Morais and Claude Opus 5.5</div>
       </div>
     </div>
     <div class="links">
@@ -239,6 +262,8 @@
       <button class="link" onclick={() => open(`${REPO}/blob/main/THIRD-PARTY-NOTICES.md`)}>Third-party software</button>
     </div>
   </section>
+  {/if}
+  </div>
   </div>
 
   <footer>
@@ -250,8 +275,8 @@
   /* The dialog follows the window: it grows and shrinks with it (up to a comfortable width),
      the cards reflow, and only the middle scrolls, so the title and Done stay in view. */
   dialog {
-    width: min(1120px, calc(100vw - 64px));
-    max-height: calc(100vh - 64px);
+    width: min(1040px, calc(100vw - 64px));
+    height: min(720px, calc(100vh - 64px));
     padding: 0;
     border: 1px solid var(--line);
     border-radius: 10px;
@@ -265,20 +290,30 @@
     flex-direction: column;
   }
 
-  dialog::backdrop {
-    background: rgb(0 0 0 / 0.35);
+
+  .layout {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    border-top: 1px solid var(--line);
   }
 
   .body {
     flex: 1;
-    min-height: 0;
+    min-width: 0;
     overflow-y: auto;
+    padding-top: 16px;
+    outline: none;
+  }
+
+  .row {
+    display: flex;
+    flex-wrap: wrap;
+    column-gap: 12px;
   }
 
   header {
     flex: none;
-    border-bottom: 1px solid var(--line);
-    margin-bottom: 14px;
   }
 
   footer {
@@ -309,7 +344,7 @@
   }
 
   section {
-    padding: 0 18px 16px;
+    padding: 0 20px 18px;
   }
 
   .check {
@@ -391,7 +426,7 @@
 
   .cards {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
     gap: 10px;
   }
 

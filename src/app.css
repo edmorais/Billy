@@ -154,3 +154,19 @@ button {
 .muted {
   color: var(--muted);
 }
+
+/* Billy's dialogs (see src/lib/modal.svelte.ts) are not native modals, so they are placed
+   here: centred in the window below the title bar, above the dimmed content. */
+:where(dialog[open]:not(:modal)) {
+  position: fixed;
+  inset: var(--titlebar-h) 0 0 0;
+  margin: auto;
+  z-index: 100;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: var(--titlebar-h) 0 0 0;
+  z-index: 99;
+  background: rgb(0 0 0 / 0.35);
+}
