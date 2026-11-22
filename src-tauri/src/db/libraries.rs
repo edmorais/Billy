@@ -199,6 +199,21 @@ pub fn purge_orphan_state(conn: &Connection, library_id: i64) -> Result<()> {
     Ok(())
 }
 
+/// Forgets files that no library holds and that nothing else refers to: no favorite, read
+/// status or saved annotations in any library. Their last-read page goes with them. Files with
+/// such marks are kept, so the marks come back if their folder is added again. Returns how
+/// many files were forgotten.
+pub fn forget_unused_files(conn: &Connection) -> Result<usize> {
+    Ok(conn.execute(
+        "DELETE FROM files
+         WHERE NOT EXISTS (SELECT 1 FROM entries e WHERE e.file_id = files.id)
+           AND NOT EXISTS (SELECT 1 FROM favorites f WHERE f.file_id = files.id)
+           AND NOT EXISTS (SELECT 1 FROM read_state r WHERE r.file_id = files.id)
+           AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.file_id = files.id)",
+        [],
+    )?)
+}
+
 /// Subfolders that a library leaves out when it scans, as absolute paths.
 pub fn list_ignored(conn: &Connection, library_id: i64) -> Result<Vec<String>> {
     let mut stmt =

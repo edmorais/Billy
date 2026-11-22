@@ -48,12 +48,32 @@ pub fn rename_library(state: State<AppState>, id: i64, name: String) -> Result<L
 }
 
 #[tauri::command]
-pub fn delete_library(state: State<AppState>, id: i64) -> Result<()> {
+pub fn delete_library(app: AppHandle, state: State<AppState>, id: i64) -> Result<()> {
     let db = state.db();
     for root in libraries::list_roots(&db, id)? {
         state.watcher.unwatch(root.id);
     }
-    libraries::delete_library(&db, id)
+    libraries::delete_library(&db, id)?;
+    spawn_cleanup(app);
+    Ok(())
+}
+
+/// In the background: forgets files that no library uses any more, and deletes their covers.
+/// Run at startup and after documents leave the library for good.
+pub fn spawn_cleanup(app: AppHandle) {
+    std::thread::spawn(move || {
+        let state = app.state::<AppState>();
+        let result = db::open(&state.db_path).and_then(|conn| {
+            let files = libraries::forget_unused_files(&conn)?;
+            let covers = crate::thumbs::remove_unused_covers(&conn, &state.thumbs_dir)?;
+            Ok((files, covers))
+        });
+        match result {
+            Ok((0, 0)) => {}
+            Ok((files, covers)) => eprintln!("cleanup: forgot {files} unused files, deleted {covers} covers"),
+            Err(err) => eprintln!("cleanup failed: {err}"),
+        }
+    });
 }
 
 #[tauri::command]
@@ -240,7 +260,7 @@ pub fn list_missing(state: State<AppState>, library_id: i64) -> Result<Vec<Missi
 /// Forgets missing files in a library, after the user confirmed it, and deletes their
 /// saved annotations from Billy's data folders.
 #[tauri::command]
-pub fn clean_up_missing(state: State<AppState>, library_id: i64, file_ids: Vec<i64>) -> Result<()> {
+pub fn clean_up_missing(app: AppHandle, state: State<AppState>, library_id: i64, file_ids: Vec<i64>) -> Result<()> {
     let copies = missing::clean_up(&mut state.db(), library_id, &file_ids)?;
     let dirs = state.dirs();
     for copy in copies {
@@ -249,6 +269,7 @@ pub fn clean_up_missing(state: State<AppState>, library_id: i64, file_ids: Vec<i
             let _ = std::fs::remove_file(copy);
         }
     }
+    spawn_cleanup(app);
     Ok(())
 }
 
@@ -365,6 +386,7 @@ pub async fn remove_root(app: AppHandle, root_id: i64, purge: bool) -> Result<()
         if purge {
             libraries::purge_orphan_state(&conn, removed.library_id)?;
         }
+        spawn_cleanup(app.clone());
         Ok(())
     })
     .await

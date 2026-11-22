@@ -170,3 +170,21 @@ fn render_speed() {
     }
     println!("200 covers in {:?}", start.elapsed());
 }
+
+#[test]
+fn unused_covers_are_removed_and_nothing_else() {
+    let data = TempDir::new().unwrap();
+    let conn = db::open(&data.path().join("billy.db")).unwrap();
+    conn.execute("INSERT INTO files (path, size, mtime, fingerprint) VALUES ('x.pdf', 1, 0, '1f-abc')", []).unwrap();
+    let dir = data.path().join("thumbs");
+    fs::create_dir_all(&dir).unwrap();
+    for name in ["1f-abc.jpg", "2e-dead.jpg", "2e-dead.tmp", "notes.txt", "Not a cover.jpg"] {
+        fs::write(dir.join(name), b"x").unwrap();
+    }
+    assert_eq!(thumbs::remove_unused_covers(&conn, &dir).unwrap(), 1);
+    let mut left: Vec<String> = fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+    left.sort();
+    assert_eq!(left, ["1f-abc.jpg", "2e-dead.tmp", "Not a cover.jpg", "notes.txt"]);
+    // No cover folder yet: nothing to do.
+    assert_eq!(thumbs::remove_unused_covers(&conn, &data.path().join("none")).unwrap(), 0);
+}

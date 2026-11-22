@@ -565,3 +565,50 @@ fn only_subfolders_of_the_library_can_be_ignored() {
 fn file_id(conn: &Connection, path: &Path) -> i64 {
     conn.query_row("SELECT id FROM files WHERE path = ?1", [path.to_string_lossy()], |r| r.get(0)).unwrap()
 }
+
+#[test]
+fn deleting_a_library_forgets_files_no_library_uses() {
+    let mut s = setup();
+    let a = libraries::create_library(&s.conn, "A").unwrap();
+    let b = libraries::create_library(&s.conn, "B").unwrap();
+    add_and_scan(&mut s.conn, a.id, &s.books);
+    add_and_scan(&mut s.conn, b.id, &s.books);
+    assert_eq!(count(&s.conn, "SELECT COUNT(*) FROM files"), 3);
+
+    // B still holds every file.
+    libraries::delete_library(&s.conn, a.id).unwrap();
+    assert_eq!(libraries::forget_unused_files(&s.conn).unwrap(), 0);
+    assert_eq!(count(&s.conn, "SELECT COUNT(*) FROM files"), 3);
+
+    // Nothing holds them now.
+    libraries::delete_library(&s.conn, b.id).unwrap();
+    assert_eq!(libraries::forget_unused_files(&s.conn).unwrap(), 3);
+    assert_eq!(count(&s.conn, "SELECT COUNT(*) FROM files"), 0);
+}
+
+#[test]
+fn files_with_marks_or_annotations_are_kept() {
+    let mut s = setup();
+    let library = libraries::create_library(&s.conn, "Books").unwrap();
+    let root = add_and_scan(&mut s.conn, library.id, &s.books);
+    let a = file_id(&s.conn, &s.books.join("a.pdf"));
+    let b = file_id(&s.conn, &s.books.join("Sub").join("b.PDF"));
+    marks::set_read(&mut s.conn, library.id, &[a], true).unwrap();
+    s.conn
+        .execute(
+            "INSERT INTO annotations (file_id, copy_path, source_fingerprint, updated_at) VALUES (?1, 'x', 'y', 0)",
+            [b],
+        )
+        .unwrap();
+
+    // Removing the folder but keeping favorites and read status: a.pdf (read) and b.PDF
+    // (annotated) stay; big.pdf is forgotten.
+    libraries::remove_root(&s.conn, root).unwrap();
+    assert_eq!(libraries::forget_unused_files(&s.conn).unwrap(), 1);
+    assert_eq!(count(&s.conn, "SELECT COUNT(*) FROM files"), 2);
+
+    // Adding the folder again brings back the read status.
+    add_and_scan(&mut s.conn, library.id, &s.books);
+    assert_eq!(count(&s.conn, &format!("SELECT read FROM read_state WHERE file_id = {a}")), 1);
+    assert_eq!(count(&s.conn, "SELECT COUNT(*) FROM files"), 3);
+}

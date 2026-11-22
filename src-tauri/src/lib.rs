@@ -44,6 +44,7 @@ pub fn run() {
             let queue = state.thumbs.clone();
             app.manage(state);
             commands::start_auto_sync(app.handle().clone());
+            commands::spawn_cleanup(app.handle().clone());
 
             let handle = app.handle().clone();
             let error_handle = app.handle().clone();

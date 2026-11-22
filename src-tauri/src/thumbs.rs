@@ -155,6 +155,39 @@ pub fn process(conn: &Connection, pdfium: &Pdfium, thumbs_dir: &Path, file_id: i
     Ok(Some(update))
 }
 
+/// Deletes the covers in `thumbs_dir` that no file record uses any more, for example after a
+/// library was deleted. Only files named like a cover (`<fingerprint>.jpg`) are touched.
+/// Returns how many were deleted.
+pub fn remove_unused_covers(conn: &Connection, thumbs_dir: &Path) -> Result<usize> {
+    // List the folder before reading the records. A cover is written after its record, so a
+    // cover in this listing whose record is still there afterwards is kept.
+    let names: Vec<String> = match std::fs::read_dir(thumbs_dir) {
+        Ok(entries) => entries
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+            .filter_map(|e| e.file_name().into_string().ok())
+            .filter(|name| name.strip_suffix(".jpg").is_some_and(is_fingerprint))
+            .collect(),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(err) => return Err(err.into()),
+    };
+    let mut stmt = conn.prepare("SELECT fingerprint FROM files")?;
+    let known: std::collections::HashSet<String> =
+        stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+    let mut removed = 0;
+    for name in names {
+        if !known.contains(&name[..name.len() - 4]) && std::fs::remove_file(thumbs_dir.join(&name)).is_ok() {
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
+/// A fingerprint as Billy writes them: hex digits and dashes.
+fn is_fingerprint(name: &str) -> bool {
+    !name.is_empty() && name.len() <= 64 && name.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
+}
+
 /// Work waiting for the thumbnail worker.
 #[derive(Default)]
 pub struct ThumbQueue {
@@ -256,7 +289,7 @@ pub fn spawn_worker(
 pub fn serve(thumbs_dir: &Path, uri_path: &str) -> tauri::http::Response<Vec<u8>> {
     use tauri::http::{Response, StatusCode, header};
     let name = uri_path.trim_start_matches('/');
-    let valid = !name.is_empty() && name.len() <= 64 && name.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-');
+    let valid = is_fingerprint(name);
     let found = if valid { std::fs::read(thumb_path(thumbs_dir, name)).ok() } else { None };
     match found {
         Some(bytes) => Response::builder()
