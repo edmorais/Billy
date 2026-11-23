@@ -21,7 +21,7 @@ The fonts are packaged by [Fontsource](https://fontsource.org).
 
 These are compiled into Billy. Each is under a permissive license (MIT, Apache 2.0, or both, unless noted):
 
-- [Tauri](https://tauri.app) and its dialog, opener, updater and process plugins
+- [Tauri](https://tauri.app) and its dialog, opener, updater, process and window-state plugins
 - [Svelte](https://svelte.dev) and [SvelteKit](https://svelte.dev/docs/kit)
 - [rusqlite](https://github.com/rusqlite/rusqlite), [pdfium-render](https://github.com/ajrcarey/pdfium-render), [image](https://github.com/image-rs/image), [notify](https://github.com/notify-rs/notify) (CC0 1.0, MIT or Apache 2.0), [walkdir](https://github.com/BurntSushi/walkdir) (MIT or Unlicense), [xxhash-rust](https://github.com/DoumanAsh/xstd) (BSL 1.0), [serde](https://serde.rs), [thiserror](https://github.com/dtolnay/thiserror) and [dunce](https://gitlab.com/kornelski/dunce) (CC0 1.0, MIT or Apache 2.0)
 
