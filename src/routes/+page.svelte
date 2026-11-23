@@ -18,6 +18,7 @@
   import TitleBar from "$lib/components/TitleBar.svelte";
   import { coversMade } from "$lib/covers.svelte";
   import { modal } from "$lib/modal.svelte";
+  import { initReaderPrefs } from "$lib/readerPrefs.svelte";
   import { applyTheme, readThemeSettings } from "$lib/theme.svelte";
   import { initUpdates, installUpdate, updates } from "$lib/updates.svelte";
   import { display, initDisplay, setSidebarWidth, SIDEBAR_DEFAULT } from "$lib/display.svelte";
@@ -653,6 +654,7 @@
       applyTheme(readThemeSettings(s.theme as Record<string, unknown>));
       initUpdates(s.updates as Record<string, unknown> | undefined);
       initDisplay(s.display as Record<string, unknown> | undefined);
+      initReaderPrefs(s.reader as Record<string, unknown> | undefined);
     }, showError);
     for (const id of await api.scanningRoots().catch(() => [])) scanning[id] = 0;
     unlisten.push(

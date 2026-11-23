@@ -25,6 +25,7 @@
   import { checkForUpdates, installUpdate, setAutoUpdates, updates } from "$lib/updates.svelte";
   import { formatDate } from "$lib/view";
   import { display, setTextSize, textSizes } from "$lib/display.svelte";
+  import { readerPrefs, scrollOptions, setReaderPrefs, spreadOptions, zoomOptions } from "$lib/readerPrefs.svelte";
 
   let {
     version,
@@ -39,6 +40,7 @@
 
   const pages: NavPage[] = [
     { id: "appearance", label: "Appearance", icon: "palette" },
+    { id: "reader", label: "Reader", icon: "book" },
     { id: "updates", label: "Updates", icon: "sync" },
     { id: "about", label: "About", icon: "info" },
   ];
@@ -212,6 +214,65 @@
     </div>
   </section>
 
+  {:else if page === "reader"}
+  <section>
+    <h3>Zoom</h3>
+    <div class="segmented" role="radiogroup" aria-label="Zoom">
+      {#each zoomOptions as option (option.value)}
+        <button
+          role="radio"
+          aria-checked={readerPrefs.zoom === option.value}
+          class:on={readerPrefs.zoom === option.value}
+          onclick={() => setReaderPrefs({ zoom: option.value })}
+        >
+          {option.label}
+        </button>
+      {/each}
+    </div>
+    <p class="hint">
+      Page fit shows each whole page. Automatic fits the page's width unless that makes it too large. Actual size
+      shows pages at their printed size.
+    </p>
+  </section>
+
+  <section>
+    <h3>Scrolling</h3>
+    <div class="segmented" role="radiogroup" aria-label="Scrolling">
+      {#each scrollOptions as option (option.value)}
+        <button
+          role="radio"
+          aria-checked={readerPrefs.scroll === option.value}
+          class:on={readerPrefs.scroll === option.value}
+          onclick={() => setReaderPrefs({ scroll: option.value })}
+        >
+          {option.label}
+        </button>
+      {/each}
+    </div>
+    <p class="hint">Wrapped lays pages out side by side and wraps them in rows. Page by page shows one page (or spread) at a time.</p>
+  </section>
+
+  <section>
+    <h3>Spreads</h3>
+    <div class="segmented" role="radiogroup" aria-label="Spreads">
+      {#each spreadOptions as option (option.value)}
+        <button
+          role="radio"
+          aria-checked={readerPrefs.spread === option.value}
+          class:on={readerPrefs.spread === option.value}
+          onclick={() => setReaderPrefs({ spread: option.value })}
+        >
+          {option.label}
+        </button>
+      {/each}
+    </div>
+    <p class="hint">
+      Odd spreads show pages two at a time: 1–2, 3–4. Even spreads start with the first page alone, then 2–3, 4–5,
+      like a printed book.
+    </p>
+  </section>
+
+  <p class="hint note">These apply when a document opens. The reader's toolbar can still change them for that document.</p>
   {:else if page === "updates"}
   <section>
     <h3>Updates</h3>
@@ -368,6 +429,10 @@
 
   .hint.inline {
     margin: 0;
+  }
+
+  .hint.note {
+    margin: 0 20px;
   }
 
   .about-row {

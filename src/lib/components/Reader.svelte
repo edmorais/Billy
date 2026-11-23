@@ -5,6 +5,7 @@
   // and Billy's backend reads them from disk, so big books open quickly and nothing is served
   // over a URL. Annotations are saved by Billy, never by PDF.js's own download button.
   import { onDestroy, onMount } from "svelte";
+  import { readerPrefs } from "$lib/readerPrefs.svelte";
   import { ask } from "@tauri-apps/plugin-dialog";
   import { api, type Doc, type OpenInfo, type PdfSource, type SavedPdf } from "$lib/api";
   import { displayName, formatSize } from "$lib/view";
@@ -87,6 +88,10 @@
     options.set("enableHighlightFloatingButton", true);
     options.set("enableAltTextModelDownload", false);
     options.set("viewerCssTheme", theme.mode === "dark" ? 2 : 1);
+    // How documents open, from Settings > Reader.
+    options.set("defaultZoomValue", readerPrefs.zoom);
+    options.set("scrollModeOnLoad", readerPrefs.scroll);
+    options.set("spreadModeOnLoad", readerPrefs.spread);
 
     // The viewer's own security policy allows stylesheets from the app, not inline styles.
     const link = w.document.createElement("link");
