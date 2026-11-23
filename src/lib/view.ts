@@ -24,6 +24,8 @@ export interface ViewSettings {
   showMissing: boolean;
   /** Folder shown when the library was last open. `null` is the library itself. */
   folderId: number | null;
+  /** Folders expanded in the sidebar's tree. */
+  expanded: number[];
 }
 
 export const defaultSettings: ViewSettings = {
@@ -38,10 +40,17 @@ export const defaultSettings: ViewSettings = {
   shelfOpen: true,
   showMissing: false,
   folderId: null,
+  expanded: [],
 };
 
+/** A library's stored view settings, with defaults for anything missing or not understood. */
 export function readSettings(raw: Record<string, unknown> | undefined): ViewSettings {
-  return { ...defaultSettings, ...(raw as Partial<ViewSettings>) };
+  const settings: ViewSettings = { ...defaultSettings, ...(raw as Partial<ViewSettings>) };
+  if (!viewModes.some((m) => m.id === settings.view)) settings.view = defaultSettings.view;
+  if (!sortFields.some((f) => f.id === settings.sort)) settings.sort = defaultSettings.sort;
+  if (!["all", "unread", "read"].includes(settings.filter)) settings.filter = defaultSettings.filter;
+  if (!Array.isArray(settings.expanded)) settings.expanded = [];
+  return settings;
 }
 
 export const viewModes: { id: ViewMode; label: string }[] = [

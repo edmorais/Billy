@@ -26,6 +26,16 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // Reopens the window where it was: size, position, and maximized or not.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::SIZE
+                        | tauri_plugin_window_state::StateFlags::POSITION
+                        | tauri_plugin_window_state::StateFlags::MAXIMIZED,
+                )
+                .build(),
+        )
         // Serves cached thumbnails to the UI at http://thumb.localhost/<fingerprint>.
         .register_asynchronous_uri_scheme_protocol("thumb", |ctx, request, responder| {
             let thumbs_dir = ctx.app_handle().state::<AppState>().thumbs_dir.clone();

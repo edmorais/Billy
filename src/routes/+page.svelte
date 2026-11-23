@@ -342,11 +342,16 @@
       return;
     }
     if (libraryId === null || !libraries.some((l) => l.id === libraryId)) {
-      const first = libraries[0];
-      libraryId = first?.id ?? null;
-      settings = readSettings(first?.viewSettings);
+      // Reopen the library that was open last, if it still exists.
+      const open = libraries.find((l) => l.id === lastLibrary) ?? libraries[0];
+      libraryId = open?.id ?? null;
+      settings = readSettings(open?.viewSettings);
+      expanded = new Set(settings.expanded);
     }
   }
+
+  /** The library that was open when Billy last closed. */
+  let lastLibrary: number | null = null;
 
   function selectLibrary(id: number) {
     if (id === libraryId) return;
@@ -354,20 +359,26 @@
     settings = readSettings(libraries.find((l) => l.id === id)?.viewSettings);
     search = "";
     selected = null;
-    expanded = new Set();
+    expanded = new Set(settings.expanded);
+    lastLibrary = id;
+    saveAppSetting("lastLibrary", id);
   }
 
-  let saveTimer: ReturnType<typeof setTimeout> | undefined;
+  // Saves run one after another, at once, so the last change is stored even if Billy is
+  // closed right after it, and quick changes are stored in the order they were made.
+  let saving: Promise<unknown> = Promise.resolve();
+
+  function saveAppSetting(key: string, value: unknown) {
+    saving = saving.then(() => api.setSetting(key, value)).catch(showError);
+  }
+
   function change(update: Partial<ViewSettings>) {
     settings = { ...settings, ...update };
     const id = libraryId;
     const snapshot = { ...settings };
     const lib = libraries.find((l) => l.id === id);
     if (lib) lib.viewSettings = snapshot as unknown as Record<string, unknown>;
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      if (id !== null) api.saveViewSettings(id, snapshot).catch(showError);
-    }, 300);
+    if (id !== null) saving = saving.then(() => api.saveViewSettings(id, snapshot)).catch(showError);
   }
 
   function navigate(id: number | null) {
@@ -380,7 +391,7 @@
       for (let f = folderById.get(id); f && f.parentId !== null; f = folderById.get(f.parentId)) open.add(f.parentId);
       expanded = open;
     }
-    change({ folderId: id });
+    change({ folderId: id, expanded: [...expanded] });
   }
 
   function goUp() {
@@ -395,6 +406,7 @@
     if (open.has(id)) open.delete(id);
     else open.add(id);
     expanded = open;
+    change({ expanded: [...open] });
   }
 
   function sortBy(field: SortField) {
@@ -636,7 +648,8 @@
 
   onMount(async () => {
     api.appVersion().then((v) => (version = v), showError);
-    api.getSettings().then((s) => {
+    const appSettings = api.getSettings().then((s) => {
+      if (typeof s.lastLibrary === "number") lastLibrary = s.lastLibrary;
       applyTheme(readThemeSettings(s.theme as Record<string, unknown>));
       initUpdates(s.updates as Record<string, unknown> | undefined);
       initDisplay(s.display as Record<string, unknown> | undefined);
@@ -664,12 +677,12 @@
       await onThumbsError((message) => showError(`Thumbnails are unavailable: ${message}`)),
     );
     api.thumbsRemaining().then((n) => (thumbsLeft = n), () => {});
+    await appSettings.catch(() => {}); // It says which library to reopen.
     await loadLibraries();
   });
 
   onDestroy(() => {
     unlisten.forEach((fn) => fn());
-    clearTimeout(saveTimer);
     clearTimeout(visibleTimer);
   });
 </script>
