@@ -19,6 +19,8 @@
   import { coversMade } from "$lib/covers.svelte";
   import { modal } from "$lib/modal.svelte";
   import { initReaderPrefs } from "$lib/readerPrefs.svelte";
+  import { history as historyPrefs, historyChanged, initHistory, setHistory, SIDEBAR_COUNT } from "$lib/history.svelte";
+  import HistoryBar from "$lib/components/HistoryBar.svelte";
   import { applyTheme, readThemeSettings } from "$lib/theme.svelte";
   import { initUpdates, installUpdate, updates } from "$lib/updates.svelte";
   import { display, initDisplay, setSidebarWidth, SIDEBAR_DEFAULT } from "$lib/display.svelte";
@@ -351,10 +353,53 @@
     }
   }
 
+  /** The last few documents opened in any library, for the sidebar, and the History view's
+   *  list. Both are reloaded when a document closes, the library changes or the history is
+   *  cleared. */
+  let recentDocs = $state<Doc[]>([]);
+  let historyDocs = $state<Doc[]>([]);
+  /** The History view is showing in place of the library's folders. */
+  let showingHistory = $state(false);
+  /** The History view's library filter, if that library still exists. */
+  let historyLibrary = $derived(libraries.some((l) => l.id === historyPrefs.library) ? historyPrefs.library : null);
+
+  $effect(() => {
+    void docsVersion;
+    void historyChanged.version;
+    const prefer = libraryId;
+    if (!historyPrefs.enabled) {
+      recentDocs = [];
+      return;
+    }
+    api.listHistory(null, SIDEBAR_COUNT, prefer).then(
+      (list) => (recentDocs = list),
+      () => {},
+    );
+  });
+
+  $effect(() => {
+    void docsVersion;
+    void historyChanged.version;
+    const filter = historyLibrary;
+    const size = historyPrefs.size;
+    const prefer = libraryId;
+    if (!showingHistory || !historyPrefs.enabled) return;
+    api.listHistory(filter, size, prefer).then(
+      (list) => (historyDocs = list),
+      () => {},
+    );
+  });
+
+  // Leave the History view when there is nothing to show, or when searching the library.
+  $effect(() => {
+    if (showingHistory && (!historyPrefs.enabled || search.trim() !== "")) showingHistory = false;
+  });
+
   /** The library that was open when Billy last closed. */
   let lastLibrary: number | null = null;
 
   function selectLibrary(id: number) {
+    showingHistory = false;
     if (id === libraryId) return;
     libraryId = id;
     settings = readSettings(libraries.find((l) => l.id === id)?.viewSettings);
@@ -383,6 +428,7 @@
   }
 
   function navigate(id: number | null) {
+    showingHistory = false;
     if (id === singleRoot?.id) id = null;
     selected = null;
     search = "";
@@ -442,7 +488,10 @@
     if (!confirmed) return;
     try {
       await api.discardAnnotations(doc.fileId);
-      copiesOf(doc.fileId).forEach((d) => (d.annotated = false));
+      // Annotations belong to the file, so every library's copy changes.
+      [...docs, ...shelfAll, ...recentDocs, ...historyDocs]
+        .filter((d) => d.fileId === doc.fileId)
+        .forEach((d) => (d.annotated = false));
     } catch (err) {
       showError(err);
     }
@@ -462,29 +511,32 @@
   }
 
   /** Every loaded copy of a document: the main list and the shelf hold separate objects. */
-  function copiesOf(fileId: number): Doc[] {
-    return [...docs, ...shelfAll].filter((d) => d.fileId === fileId);
+  /** Every copy on screen of this document in its library. */
+  function copiesOf(doc: Doc): Doc[] {
+    return [...docs, ...shelfAll, ...recentDocs, ...historyDocs].filter(
+      (d) => d.fileId === doc.fileId && d.libraryId === doc.libraryId,
+    );
   }
 
+  // Favorites and read status belong to the document's own library, which is not always the
+  // open one (the history lists every library's documents).
   async function setFavorite(doc: Doc, favorite: boolean) {
-    if (libraryId === null) return;
-    copiesOf(doc.fileId).forEach((d) => (d.favorite = favorite));
+    copiesOf(doc).forEach((d) => (d.favorite = favorite));
     try {
-      await api.setFavorite(libraryId, [doc.fileId], favorite);
+      await api.setFavorite(doc.libraryId, [doc.fileId], favorite);
     } catch (err) {
-      copiesOf(doc.fileId).forEach((d) => (d.favorite = !favorite));
+      copiesOf(doc).forEach((d) => (d.favorite = !favorite));
       showError(err);
     }
     shelfVersion++;
   }
 
   async function setRead(doc: Doc, read: boolean) {
-    if (libraryId === null) return;
-    copiesOf(doc.fileId).forEach((d) => (d.read = read));
+    copiesOf(doc).forEach((d) => (d.read = read));
     try {
-      await api.setRead(libraryId, [doc.fileId], read);
+      await api.setRead(doc.libraryId, [doc.fileId], read);
     } catch (err) {
-      copiesOf(doc.fileId).forEach((d) => (d.read = !read));
+      copiesOf(doc).forEach((d) => (d.read = !read));
       showError(err);
     }
   }
@@ -641,7 +693,8 @@
       searchInput?.select();
     } else if (event.key === "Backspace" && !typing && !showSettings && !showCleanUp && !showAppSettings && !menu) {
       event.preventDefault();
-      goUp();
+      if (showingHistory) showingHistory = false;
+      else goUp();
     }
   }
 
@@ -655,6 +708,7 @@
       initUpdates(s.updates as Record<string, unknown> | undefined);
       initDisplay(s.display as Record<string, unknown> | undefined);
       initReaderPrefs(s.reader as Record<string, unknown> | undefined);
+      initHistory(s.history as Record<string, unknown> | undefined);
     }, showError);
     for (const id of await api.scanningRoots().catch(() => [])) scanning[id] = 0;
     unlisten.push(
@@ -743,6 +797,14 @@
     {folderId}
     {version}
     onSelectLibrary={selectLibrary}
+    history={recentDocs}
+    historyActive={showingHistory}
+    onOpenDoc={openDoc}
+    onDocMenu={(e, doc) => openMenu({ x: e.clientX, y: e.clientY }, { key: `d${doc.fileId}`, kind: "doc", doc })}
+    onShowHistory={() => {
+      showingHistory = true;
+      selected = null;
+    }}
     onSelectFolder={navigate}
     onToggle={toggle}
     onCreateLibrary={createLibrary}
@@ -768,7 +830,29 @@
         {/if}
       </div>
     {/if}
-    {#if library}
+    {#if library && showingHistory}
+      <HistoryBar
+        view={historyPrefs.view}
+        count={historyPrefs.size}
+        {libraries}
+        library={historyLibrary}
+        onView={(view) => setHistory({ view })}
+        onLibrary={(library) => setHistory({ library })}
+        onBack={() => (showingHistory = false)}
+      />
+      <DocumentView
+        mode={historyPrefs.view}
+        groups={[{ key: "history", label: null, items: historyDocs.map(docItem) }]}
+        {selected}
+        sort={null}
+        desc={false}
+        emptyMessage="No documents opened yet."
+        onSelect={(key) => (selected = key)}
+        onOpen={openItem}
+        onVisible={requestThumbs}
+        onContextMenu={openMenu}
+      />
+    {:else if library}
       <Toolbar
         {crumbs}
         {settings}
@@ -827,6 +911,8 @@
         <button class="link" onclick={() => (error = "")}>Dismiss</button>
       {:else if notice}
         <span>{notice}</span>
+      {:else if library && showingHistory}
+        <span>{historyDocs.length} {historyDocs.length === 1 ? "document" : "documents"} in the history</span>
       {:else if library}
         <span>
           {visibleDocs.length}

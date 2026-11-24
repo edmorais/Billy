@@ -87,6 +87,8 @@ fn depth(rel_path: &str) -> usize {
 #[serde(rename_all = "camelCase")]
 pub struct Document {
     pub file_id: i64,
+    /// The library this entry belongs to. Favorites and read status are kept per library.
+    pub library_id: i64,
     pub name: String,
     pub path: String,
     pub folder_id: i64,
@@ -147,45 +149,11 @@ pub fn list_documents_with(
         }
     };
     let sql = format!(
-        "SELECT x.id, x.path, e.folder_id, x.size, x.mtime, e.date_added, x.page_count,
-                x.title, x.author, x.fingerprint,
-                COALESCE(rs.read, 0), fav.file_id IS NOT NULL, x.thumb_status,
-                x.missing_since IS NOT NULL, r.status = 'offline',
-                EXISTS (SELECT 1 FROM annotations a WHERE a.file_id = x.id)
-         FROM entries e
-         JOIN files x ON x.id = e.file_id
-         JOIN roots r ON r.id = e.root_id
-         LEFT JOIN read_state rs ON rs.library_id = e.library_id AND rs.file_id = e.file_id
-         LEFT JOIN favorites fav ON fav.library_id = e.library_id AND fav.file_id = e.file_id
+        "SELECT {DOCUMENT_COLUMNS} FROM {DOCUMENT_TABLES}
          WHERE e.library_id = ?1 {missing} {scope} {favorites}"
     );
     let mut stmt = conn.prepare(&sql)?;
-    let map = |r: &rusqlite::Row| {
-        let path: String = r.get(1)?;
-        let name = Path::new(&path)
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| path.clone());
-        Ok(Document {
-            file_id: r.get(0)?,
-            name,
-            path,
-            folder_id: r.get(2)?,
-            size: r.get(3)?,
-            modified: r.get(4)?,
-            added: r.get(5)?,
-            pages: r.get(6)?,
-            title: r.get(7)?,
-            author: r.get(8)?,
-            fingerprint: r.get(9)?,
-            thumb_status: r.get(12)?,
-            read: r.get(10)?,
-            favorite: r.get(11)?,
-            missing: r.get(13)?,
-            offline: r.get(14)?,
-            annotated: r.get(15)?,
-        })
-    };
+    let map = document_from_row;
     let rows = match folder_id {
         None => stmt.query_map(params![library_id], map)?.collect::<rusqlite::Result<Vec<_>>>()?,
         Some(folder) => stmt
@@ -193,4 +161,79 @@ pub fn list_documents_with(
             .collect::<rusqlite::Result<Vec<_>>>()?,
     };
     Ok(rows)
+}
+
+/// The columns [`document_from_row`] reads, for the tables in [`DOCUMENT_TABLES`].
+const DOCUMENT_COLUMNS: &str = "x.id, x.path, e.folder_id, x.size, x.mtime, e.date_added, x.page_count,
+    x.title, x.author, x.fingerprint,
+    COALESCE(rs.read, 0), fav.file_id IS NOT NULL, x.thumb_status,
+    x.missing_since IS NOT NULL, r.status = 'offline',
+    EXISTS (SELECT 1 FROM annotations a WHERE a.file_id = x.id), e.library_id";
+
+/// A library's entries with their files, roots, read status and favorites.
+const DOCUMENT_TABLES: &str = "entries e
+    JOIN files x ON x.id = e.file_id
+    JOIN roots r ON r.id = e.root_id
+    LEFT JOIN read_state rs ON rs.library_id = e.library_id AND rs.file_id = e.file_id
+    LEFT JOIN favorites fav ON fav.library_id = e.library_id AND fav.file_id = e.file_id";
+
+fn document_from_row(r: &rusqlite::Row) -> rusqlite::Result<Document> {
+    let path: String = r.get(1)?;
+    let name = Path::new(&path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.clone());
+    Ok(Document {
+        file_id: r.get(0)?,
+        library_id: r.get(16)?,
+        name,
+        path,
+        folder_id: r.get(2)?,
+        size: r.get(3)?,
+        modified: r.get(4)?,
+        added: r.get(5)?,
+        pages: r.get(6)?,
+        title: r.get(7)?,
+        author: r.get(8)?,
+        fingerprint: r.get(9)?,
+        thumb_status: r.get(12)?,
+        read: r.get(10)?,
+        favorite: r.get(11)?,
+        missing: r.get(13)?,
+        offline: r.get(14)?,
+        annotated: r.get(15)?,
+    })
+}
+
+/// The documents opened most recently, newest first, at most `limit` of them. With
+/// `library_id`, only that library's documents; without it, every library's, each file once:
+/// as an entry of `prefer` (the library that is open) if it is there, otherwise of the first
+/// library that holds it. Missing files are left out.
+pub fn list_history(
+    conn: &Connection,
+    library_id: Option<i64>,
+    limit: i64,
+    prefer: Option<i64>,
+) -> Result<Vec<Document>> {
+    let which = match library_id {
+        Some(_) => "e.library_id = ?1",
+        None => {
+            "e.library_id = (SELECT e2.library_id FROM entries e2 WHERE e2.file_id = x.id
+                             ORDER BY e2.library_id = ?3 DESC, e2.library_id LIMIT 1)"
+        }
+    };
+    let sql = format!(
+        "SELECT {DOCUMENT_COLUMNS} FROM {DOCUMENT_TABLES}
+         JOIN file_state st ON st.file_id = x.id
+         WHERE {which} AND st.last_opened_at IS NOT NULL AND x.missing_since IS NULL
+         ORDER BY st.last_opened_at DESC, x.id DESC
+         LIMIT ?2"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let limit = limit.clamp(1, 100);
+    let rows = match library_id {
+        Some(id) => stmt.query_map(params![id, limit], document_from_row)?,
+        None => stmt.query_map(params![0, limit, prefer.unwrap_or(-1)], document_from_row)?,
+    };
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
 }

@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { FolderNode, Library } from "$lib/api";
-  import { collator } from "$lib/view";
+  import type { Doc, FolderNode, Library } from "$lib/api";
+  import { collator, displayName } from "$lib/view";
   import Icon from "./Icon.svelte";
   import FolderTreeNode from "./FolderTreeNode.svelte";
 
@@ -19,6 +19,13 @@
     onFolderMenu: (event: MouseEvent, node: FolderNode) => void;
     onLibraryMenu: (event: MouseEvent, library: Library) => void;
     onOpenAppSettings: () => void;
+    /** The last opened documents in any library, newest first; empty hides the section. */
+    history: Doc[];
+    /** The History view is showing. */
+    historyActive: boolean;
+    onOpenDoc: (doc: Doc) => void;
+    onDocMenu: (event: MouseEvent, doc: Doc) => void;
+    onShowHistory: () => void;
   }
 
   let {
@@ -36,6 +43,11 @@
     onFolderMenu,
     onLibraryMenu,
     onOpenAppSettings,
+    history,
+    historyActive,
+    onOpenDoc,
+    onDocMenu,
+    onShowHistory,
   }: Props = $props();
 
   function libraryMenu(event: MouseEvent, library: Library) {
@@ -98,6 +110,40 @@
       />
       <button class="btn primary" type="submit" disabled={!newName.trim()}>Add</button>
     </form>
+  {/if}
+
+  {#if history.length > 0}
+    <div class="section-head">
+      <h2>History</h2>
+      <button
+        class="icon-btn"
+        class:on={historyActive}
+        title="Show the full history"
+        aria-label="Show the full history"
+        aria-pressed={historyActive}
+        onclick={onShowHistory}
+      >
+        <Icon name="arrow-right" size={14} />
+      </button>
+    </div>
+    <ul class="history" aria-label="Recently opened">
+      {#each history.slice(0, 5) as doc (doc.fileId)}
+        <li>
+          <button
+            class="recent"
+            title={`${doc.path}${doc.libraryId !== libraryId ? `\nIn ${libraries.find((l) => l.id === doc.libraryId)?.name ?? "another library"}` : ""}`}
+            onclick={() => onOpenDoc(doc)}
+            oncontextmenu={(e) => {
+              e.preventDefault();
+              onDocMenu(e, doc);
+            }}
+          >
+            <Icon name="book" size={14} />
+            <span class="name">{displayName(doc)}</span>
+          </button>
+        </li>
+      {/each}
+    </ul>
   {/if}
 
   {#if current}
@@ -164,7 +210,11 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 4px 4px 8px;
+    padding: 20px 4px 6px 8px;
+  }
+
+  .section-head:first-child {
+    padding-top: 6px;
   }
 
   h2 {
@@ -233,6 +283,28 @@
     font-size: 11px;
     color: var(--muted);
     font-variant-numeric: tabular-nums;
+  }
+
+  .history {
+    flex: none;
+  }
+
+  .recent {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--muted);
+    width: 100%;
+    height: 28px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: var(--radius);
+    background: transparent;
+    text-align: left;
+  }
+
+  .recent:hover {
+    background: var(--hover);
   }
 
   .create {

@@ -117,6 +117,8 @@ pub fn run() {
             commands::remove_root,
             commands::list_ignored,
             commands::repair_covers,
+            commands::list_history,
+            commands::clear_history,
             commands::rebuild_covers,
             commands::ignore_folder,
             commands::unignore_folder,

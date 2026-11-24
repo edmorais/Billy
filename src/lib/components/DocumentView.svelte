@@ -23,12 +23,14 @@
     mode: ViewMode;
     groups: Group[];
     selected: string | null;
-    sort: SortField;
+    /** The column the list is sorted by, or `null` when it keeps its own order. */
+    sort: SortField | null;
     desc: boolean;
     emptyMessage: string;
     onSelect: (key: string) => void;
     onOpen: (item: Item) => void;
-    onSort: (field: SortField) => void;
+    /** Clicking a column header in Details; without it the headers do nothing. */
+    onSort?: (field: SortField) => void;
     /** Called with the documents on screen that still need a thumbnail. */
     onVisible: (fileIds: number[]) => void;
     /** Right-click, the Menu key or Shift+F10 on an item. */
@@ -244,7 +246,8 @@
           class:sorted={column.field === sort}
           role="columnheader"
           aria-sort={column.field === sort ? (desc ? "descending" : "ascending") : "none"}
-          onclick={() => column.field && onSort(column.field)}
+          disabled={!onSort}
+          onclick={() => column.field && onSort?.(column.field)}
         >
           {column.label}
           {#if column.field === sort}
@@ -310,7 +313,7 @@
                       <span class="name">{displayName(item.doc)}</span>
                       <span class="meta">
                         {@render badges(item.doc)}
-                        {item.doc.pages ? `${item.doc.pages} pages` : formatSize(item.doc.size)}
+                        {item.doc.pages ? `${item.doc.pages} ${item.doc.pages === 1 ? "page" : "pages"}` : formatSize(item.doc.size)}
                       </span>
                     </div>
                   {:else if mode === "details"}

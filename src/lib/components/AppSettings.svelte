@@ -26,6 +26,8 @@
   import { formatDate } from "$lib/view";
   import { display, setTextSize, textSizes } from "$lib/display.svelte";
   import { readerPrefs, scrollOptions, setReaderPrefs, spreadOptions, zoomOptions } from "$lib/readerPrefs.svelte";
+  import { clearHistory, history, setHistory, SIZE_MAX, SIZE_MIN } from "$lib/history.svelte";
+  import { ask } from "@tauri-apps/plugin-dialog";
 
   let {
     version,
@@ -41,6 +43,7 @@
   const pages: NavPage[] = [
     { id: "appearance", label: "Appearance", icon: "palette" },
     { id: "reader", label: "Reader", icon: "book" },
+    { id: "history", label: "History", icon: "clock" },
     { id: "updates", label: "Updates", icon: "sync" },
     { id: "about", label: "About", icon: "info" },
   ];
@@ -70,6 +73,36 @@
     customName = value;
     clearTimeout(customTimer);
     customTimer = setTimeout(() => choose({ typeTheme: "custom", customFont: cleanFontName(value) }), 400);
+  }
+
+  let cleared = $state(false);
+
+  async function clear() {
+    const confirmed = await ask("Forget which documents you opened, in every library?\n\nLast pages read are kept.", {
+      title: "Clear history",
+      kind: "warning",
+      okLabel: "Clear history",
+      cancelLabel: "Cancel",
+    });
+    if (!confirmed) return;
+    try {
+      await clearHistory();
+      cleared = true;
+    } catch (err) {
+      onError(String(err));
+    }
+  }
+
+  async function setEnabled(on: boolean) {
+    setHistory({ enabled: on });
+    // Turning the history off also forgets it, so nothing is kept that is not shown.
+    if (!on) {
+      try {
+        await clearHistory();
+      } catch (err) {
+        onError(String(err));
+      }
+    }
   }
 
   const appearances: { id: Appearance; label: string }[] = [
@@ -135,6 +168,7 @@
           role="radio"
           aria-checked={theme.colorTheme === option.id}
           class:on={theme.colorTheme === option.id}
+          title={option.description}
           onclick={() => choose({ colorTheme: option.id })}
         >
           <span class="swatch" style:background={p.bg} style:border-color={p.line}>
@@ -151,7 +185,6 @@
             </span>
           </span>
           <span class="label">{option.name}</span>
-          <span class="desc">{option.description}</span>
         </button>
       {/each}
     </div>
@@ -273,6 +306,44 @@
   </section>
 
   <p class="hint note">These apply when a document opens. The reader's toolbar can still change them for that document.</p>
+  {:else if page === "history"}
+  <section>
+    <h3>History</h3>
+    <label class="check">
+      <input type="checkbox" checked={history.enabled} onchange={(e) => setEnabled(e.currentTarget.checked)} />
+      Keep a history of the documents I open
+    </label>
+    <p class="hint">
+      The sidebar shows the last five documents opened, in any library; the arrow next to History shows the rest. Turning the history off
+      also clears it.
+    </p>
+  </section>
+
+  <section class:disabled={!history.enabled}>
+    <h3><label for="history-size">Documents in the History view</label></h3>
+    <div class="range-row">
+      <input
+        id="history-size"
+        type="range"
+        min={SIZE_MIN}
+        max={SIZE_MAX}
+        step="10"
+        value={history.size}
+        disabled={!history.enabled}
+        oninput={(e) => setHistory({ size: Number(e.currentTarget.value) })}
+      />
+      <span class="range-value">{history.size}</span>
+    </div>
+  </section>
+
+  <section>
+    <h3>Clear history</h3>
+    <div class="update-row">
+      <button class="btn" onclick={clear}><Icon name="x" size={14} /> Clear history…</button>
+      {#if cleared}<span class="hint inline" role="status">The history is clear.</span>{/if}
+    </div>
+    <p class="hint">Forgets which documents you opened, in every library. The last page read in each is kept.</p>
+  </section>
   {:else if page === "updates"}
   <section>
     <h3>Updates</h3>
@@ -435,6 +506,28 @@
     margin: 0 20px;
   }
 
+  section.disabled {
+    opacity: 0.5;
+  }
+
+  .range-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: 360px;
+  }
+
+  .range-row input {
+    flex: 1;
+    accent-color: var(--accent);
+  }
+
+  .range-value {
+    min-width: 3ch;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+  }
+
   .about-row {
     display: flex;
     align-items: center;
@@ -538,9 +631,10 @@
     font-size: 12px;
   }
 
+  /* A short preview, so all twelve themes and the type cards fit without scrolling. */
   .swatch {
     display: flex;
-    height: 74px;
+    height: 42px;
     overflow: hidden;
     border: 1px solid;
     border-radius: 5px;
@@ -549,9 +643,9 @@
   .side {
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 4px;
     width: 34%;
-    padding: 8px 6px;
+    padding: 6px;
   }
 
   .pill {
@@ -574,7 +668,7 @@
     align-items: flex-end;
     gap: 4px;
     flex: 1;
-    padding: 10px;
+    padding: 6px 8px;
   }
 
   .book {

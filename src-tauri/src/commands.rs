@@ -131,9 +131,28 @@ pub fn list_documents(
 pub fn open_document(state: State<AppState>, file_id: i64) -> Result<OpenInfo> {
     let conn = state.db();
     let info = reader::open_info(&conn, file_id)?;
-    // Mark when it was last opened, keeping the last page.
-    reader::set_last_page(&conn, file_id, info.last_page.unwrap_or(1))?;
+    if crate::db::settings::history_enabled(&conn)? {
+        reader::record_opened(&conn, file_id)?;
+    }
     Ok(info)
+}
+
+/// The most recently opened documents, newest first: in one library, or in all of them
+/// (preferring entries of `prefer_library`, the one that is open).
+#[tauri::command]
+pub fn list_history(
+    state: State<AppState>,
+    library_id: Option<i64>,
+    limit: i64,
+    prefer_library: Option<i64>,
+) -> Result<Vec<Document>> {
+    browse::list_history(&state.db(), library_id, limit, prefer_library)
+}
+
+/// Forgets which documents were opened, and when.
+#[tauri::command]
+pub fn clear_history(state: State<AppState>) -> Result<()> {
+    reader::clear_history(&state.db())
 }
 
 /// A slice of a document's bytes, sent as raw binary.

@@ -37,6 +37,7 @@ function build() {
       const hasMeta = rand() < 0.7;
       docs.push({
         fileId: fileId,
+        libraryId: 1,
         name,
         path: `${folder.rootPath}\\${folder.relPath ? folder.relPath + "\\" : ""}${name}`,
         folderId: folder.id,
@@ -120,6 +121,8 @@ const samplePdf = makeSamplePdf();
 
 const appSettings: Record<string, unknown> = {};
 let ignored: string[] = [];
+/** File ids in the order they were opened, newest first. */
+let opened: number[] = [];
 
 export function installMock() {
   mockWindows("main");
@@ -152,7 +155,7 @@ export function installMock() {
       const a = args as Record<string, any>;
       switch (cmd) {
         case "app_version":
-          return "1.0.3 (mock)";
+          return "1.1.0 (mock)";
         case "plugin:webview|set_webview_zoom":
           // The real app zooms the whole window; in a browser, CSS zoom stands in.
           document.documentElement.style.setProperty("zoom", String(a.value ?? a.scaleFactor ?? 1));
@@ -160,7 +163,7 @@ export function installMock() {
         case "plugin:updater|check":
           // With ?update, pretend a newer version exists.
           return new URLSearchParams(location.search).has("update")
-            ? { rid: 1, currentVersion: "1.0.2", version: "1.0.3", date: null, body: "Faster covers and small fixes.", rawJson: {} }
+            ? { rid: 1, currentVersion: "1.0.3", version: "1.1.0", date: null, body: "Faster covers and small fixes.", rawJson: {} }
             : null;
         case "get_settings":
           return { ...appSettings };
@@ -196,6 +199,8 @@ export function installMock() {
           return null;
         case "open_document": {
           const d = docs.find((x) => x.fileId === a.fileId)!;
+          const keep = (appSettings.history as { enabled?: boolean } | undefined)?.enabled !== false;
+          if (keep) opened = [d.fileId, ...opened.filter((id) => id !== d.fileId)];
           return {
             fileId: d.fileId,
             name: d.name,
@@ -236,6 +241,15 @@ export function installMock() {
           return null;
         case "list_roots":
           return roots;
+        case "list_history":
+          return opened
+            .map((id) => docs.find((d) => d.fileId === id && !d.missing))
+            .filter((d) => d !== undefined)
+            .slice(0, a.limit)
+            .map((d) => ({ ...d }));
+        case "clear_history":
+          opened = [];
+          return null;
         case "list_ignored":
           return [...ignored];
         case "ignore_folder":

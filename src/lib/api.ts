@@ -28,6 +28,8 @@ export interface FolderNode {
 
 export interface Doc {
   fileId: number;
+  /** The library this entry belongs to; favorites and read status are kept per library. */
+  libraryId: number;
   name: string;
   path: string;
   folderId: number;
@@ -181,6 +183,11 @@ export const api = {
   scanningRoots: () => invoke<number[]>("scanning_roots"),
   addRoot: (libraryId: number, path: string) => invoke<Root>("add_root", { libraryId, path }),
   removeRoot: (rootId: number, purge: boolean) => invoke<void>("remove_root", { rootId, purge }),
+  /** The most recently opened documents, newest first: in one library, or in all of them
+   *  (`null`), preferring entries of `preferLibrary`. */
+  listHistory: (libraryId: number | null, limit: number, preferLibrary: number | null) =>
+    invoke<Doc[]>("list_history", { libraryId, limit, preferLibrary }),
+  clearHistory: () => invoke<void>("clear_history"),
   /** Subfolders a library leaves out when it syncs, as absolute paths. */
   listIgnored: (libraryId: number) => invoke<string[]>("list_ignored", { libraryId }),
   ignoreFolder: (libraryId: number, path: string) => invoke<string[]>("ignore_folder", { libraryId, path }),

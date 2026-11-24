@@ -612,3 +612,88 @@ fn files_with_marks_or_annotations_are_kept() {
     assert_eq!(count(&s.conn, &format!("SELECT read FROM read_state WHERE file_id = {a}")), 1);
     assert_eq!(count(&s.conn, "SELECT COUNT(*) FROM files"), 3);
 }
+
+#[test]
+fn history_lists_opened_documents_newest_first() {
+    use billy_lib::reader;
+    let mut s = setup();
+    let library = libraries::create_library(&s.conn, "Books").unwrap();
+    add_and_scan(&mut s.conn, library.id, &s.books);
+    let a = file_id(&s.conn, &s.books.join("a.pdf"));
+    let big = file_id(&s.conn, &s.books.join("Sub").join("Deep").join("big.pdf"));
+    let names = |conn: &Connection, limit: i64| -> Vec<String> {
+        browse::list_history(conn, Some(library.id), limit, None).unwrap().into_iter().map(|d| d.name).collect()
+    };
+    let pause = || std::thread::sleep(std::time::Duration::from_millis(5));
+
+    assert!(names(&s.conn, 10).is_empty());
+    reader::record_opened(&s.conn, a).unwrap();
+    pause();
+    reader::record_opened(&s.conn, big).unwrap();
+    assert_eq!(names(&s.conn, 10), ["big.pdf", "a.pdf"]);
+    assert_eq!(names(&s.conn, 1), ["big.pdf"]);
+
+    // Turning pages does not count as opening.
+    pause();
+    reader::set_last_page(&s.conn, a, 7).unwrap();
+    assert_eq!(names(&s.conn, 10), ["big.pdf", "a.pdf"]);
+    pause();
+    reader::record_opened(&s.conn, a).unwrap();
+    assert_eq!(names(&s.conn, 10), ["a.pdf", "big.pdf"]);
+
+    // Each library lists its own documents.
+    let empty = libraries::create_library(&s.conn, "Empty").unwrap();
+    assert!(browse::list_history(&s.conn, Some(empty.id), 10, None).unwrap().is_empty());
+
+    // Missing files are left out.
+    fs::remove_file(s.books.join("a.pdf")).unwrap();
+    let root = libraries::list_roots(&s.conn, library.id).unwrap()[0].id;
+    scan_root(&mut s.conn, root, &mut |_| {}).unwrap();
+    assert_eq!(names(&s.conn, 10), ["big.pdf"]);
+
+    // Clearing forgets the history but keeps the last page.
+    reader::clear_history(&s.conn).unwrap();
+    assert!(names(&s.conn, 10).is_empty());
+    assert_eq!(reader::open_info(&s.conn, big).unwrap().last_page, None);
+    reader::set_last_page(&s.conn, big, 3).unwrap();
+    reader::clear_history(&s.conn).unwrap();
+    assert_eq!(reader::open_info(&s.conn, big).unwrap().last_page, Some(3));
+}
+
+#[test]
+fn history_is_on_unless_turned_off() {
+    use billy_lib::db::settings;
+    let s = setup();
+    assert!(settings::history_enabled(&s.conn).unwrap());
+    settings::set(&s.conn, "history", &serde_json::json!({ "enabled": false, "size": 20 })).unwrap();
+    assert!(!settings::history_enabled(&s.conn).unwrap());
+    settings::set(&s.conn, "history", &serde_json::json!({ "enabled": true })).unwrap();
+    assert!(settings::history_enabled(&s.conn).unwrap());
+}
+
+#[test]
+fn global_history_lists_each_file_once_from_the_preferred_library() {
+    use billy_lib::reader;
+    let mut s = setup();
+    let first = libraries::create_library(&s.conn, "First").unwrap();
+    let second = libraries::create_library(&s.conn, "Second").unwrap();
+    // First holds only Sub; Second holds everything.
+    add_and_scan(&mut s.conn, first.id, &s.books.join("Sub"));
+    add_and_scan(&mut s.conn, second.id, &s.books);
+    let a = file_id(&s.conn, &s.books.join("a.pdf"));
+    let b = file_id(&s.conn, &s.books.join("Sub").join("b.PDF"));
+    reader::record_opened(&s.conn, b).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    reader::record_opened(&s.conn, a).unwrap();
+    let entries = |filter: Option<i64>, prefer: Option<i64>| -> Vec<(String, i64)> {
+        browse::list_history(&s.conn, filter, 10, prefer).unwrap().into_iter().map(|d| (d.name, d.library_id)).collect()
+    };
+
+    // All libraries: each file once, newest first. b.PDF is in both libraries and comes from
+    // the preferred one; a.pdf is only in Second.
+    assert_eq!(entries(None, Some(first.id)), [("a.pdf".into(), second.id), ("b.PDF".into(), first.id)]);
+    assert_eq!(entries(None, Some(second.id)), [("a.pdf".into(), second.id), ("b.PDF".into(), second.id)]);
+    assert_eq!(entries(None, None), [("a.pdf".into(), second.id), ("b.PDF".into(), first.id)]);
+    // One library: only its documents.
+    assert_eq!(entries(Some(first.id), None), [("b.PDF".into(), first.id)]);
+}

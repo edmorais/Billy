@@ -490,9 +490,25 @@ pub fn save_to_original(conn: &Connection, dirs: &Dirs, file_id: i64, payload: &
 
 pub fn set_last_page(conn: &Connection, file_id: i64, page: i64) -> Result<()> {
     conn.execute(
-        "INSERT INTO file_state (file_id, last_page, last_opened_at) VALUES (?1, ?2, ?3)
-         ON CONFLICT (file_id) DO UPDATE SET last_page = excluded.last_page, last_opened_at = excluded.last_opened_at",
-        params![file_id, page, now_ms()],
+        "INSERT INTO file_state (file_id, last_page) VALUES (?1, ?2)
+         ON CONFLICT (file_id) DO UPDATE SET last_page = excluded.last_page",
+        params![file_id, page],
     )?;
+    Ok(())
+}
+
+/// Notes that a document was opened now, for the history.
+pub fn record_opened(conn: &Connection, file_id: i64) -> Result<()> {
+    conn.execute(
+        "INSERT INTO file_state (file_id, last_opened_at) VALUES (?1, ?2)
+         ON CONFLICT (file_id) DO UPDATE SET last_opened_at = excluded.last_opened_at",
+        params![file_id, now_ms()],
+    )?;
+    Ok(())
+}
+
+/// Forgets when every document was opened. Last pages are kept.
+pub fn clear_history(conn: &Connection) -> Result<()> {
+    conn.execute("UPDATE file_state SET last_opened_at = NULL WHERE last_opened_at IS NOT NULL", [])?;
     Ok(())
 }
