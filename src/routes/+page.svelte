@@ -799,6 +799,8 @@
     onSelectLibrary={selectLibrary}
     history={recentDocs}
     historyActive={showingHistory}
+    historyCollapsed={historyPrefs.collapsed}
+    onToggleHistory={() => setHistory({ collapsed: !historyPrefs.collapsed })}
     onOpenDoc={openDoc}
     onDocMenu={(e, doc) => openMenu({ x: e.clientX, y: e.clientY }, { key: `d${doc.fileId}`, kind: "doc", doc })}
     onShowHistory={() => {

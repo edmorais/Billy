@@ -23,6 +23,9 @@
     history: Doc[];
     /** The History view is showing. */
     historyActive: boolean;
+    /** The History section shows only its heading. */
+    historyCollapsed: boolean;
+    onToggleHistory: () => void;
     onOpenDoc: (doc: Doc) => void;
     onDocMenu: (event: MouseEvent, doc: Doc) => void;
     onShowHistory: () => void;
@@ -45,6 +48,8 @@
     onOpenAppSettings,
     history,
     historyActive,
+    historyCollapsed,
+    onToggleHistory,
     onOpenDoc,
     onDocMenu,
     onShowHistory,
@@ -76,7 +81,7 @@
 </script>
 
 <aside>
-
+  <div class="sections">
   <div class="section-head">
     <h2>Libraries</h2>
     <button class="icon-btn" title="New library" aria-label="New library" onclick={() => (creating = !creating)}>
@@ -110,40 +115,6 @@
       />
       <button class="btn primary" type="submit" disabled={!newName.trim()}>Add</button>
     </form>
-  {/if}
-
-  {#if history.length > 0}
-    <div class="section-head">
-      <h2>History</h2>
-      <button
-        class="icon-btn"
-        class:on={historyActive}
-        title="Show the full history"
-        aria-label="Show the full history"
-        aria-pressed={historyActive}
-        onclick={onShowHistory}
-      >
-        <Icon name="arrow-right" size={14} />
-      </button>
-    </div>
-    <ul class="history" aria-label="Recently opened">
-      {#each history.slice(0, 5) as doc (doc.fileId)}
-        <li>
-          <button
-            class="recent"
-            title={`${doc.path}${doc.libraryId !== libraryId ? `\nIn ${libraries.find((l) => l.id === doc.libraryId)?.name ?? "another library"}` : ""}`}
-            onclick={() => onOpenDoc(doc)}
-            oncontextmenu={(e) => {
-              e.preventDefault();
-              onDocMenu(e, doc);
-            }}
-          >
-            <Icon name="book" size={14} />
-            <span class="name">{displayName(doc)}</span>
-          </button>
-        </li>
-      {/each}
-    </ul>
   {/if}
 
   {#if current}
@@ -188,6 +159,55 @@
     </div>
   {/if}
 
+  {#if history.length > 0}
+    <!-- Pushed to the bottom of the sidebar when there is room. -->
+    <section class="history-section" aria-label="History">
+    <div class="section-head">
+      <h2>
+        <button
+          class="collapse"
+          aria-expanded={!historyCollapsed}
+          aria-controls="recent-list"
+          title={historyCollapsed ? "Show the recent documents" : "Hide the recent documents"}
+          onclick={onToggleHistory}
+        >
+          <Icon name={historyCollapsed ? "chevron-right" : "chevron-down"} size={12} />
+          History
+        </button>
+      </h2>
+      <button
+        class="icon-btn"
+        class:on={historyActive}
+        title="Show the full history"
+        aria-label="Show the full history"
+        aria-pressed={historyActive}
+        onclick={onShowHistory}
+      >
+        <Icon name="arrow-right" size={14} />
+      </button>
+    </div>
+    <ul class="history" id="recent-list" aria-label="Recently opened" hidden={historyCollapsed}>
+      {#each history.slice(0, 5) as doc (doc.fileId)}
+        <li>
+          <button
+            class="recent"
+            title={`${doc.path}${doc.libraryId !== libraryId ? `\nIn ${libraries.find((l) => l.id === doc.libraryId)?.name ?? "another library"}` : ""}`}
+            onclick={() => onOpenDoc(doc)}
+            oncontextmenu={(e) => {
+              e.preventDefault();
+              onDocMenu(e, doc);
+            }}
+          >
+            <Icon name="book" size={14} />
+            <span class="name">{displayName(doc)}</span>
+          </button>
+        </li>
+      {/each}
+    </ul>
+    </section>
+  {/if}
+  </div>
+
   <div class="foot">
     <button class="settings" onclick={onOpenAppSettings}>
       <Icon name="settings" size={14} /> Settings
@@ -213,7 +233,7 @@
     padding: 20px 4px 6px 8px;
   }
 
-  .section-head:first-child {
+  .sections > .section-head:first-child {
     padding-top: 6px;
   }
 
@@ -232,10 +252,38 @@
     list-style: none;
   }
 
-  .libraries {
-    flex: none;
-    max-height: 30vh;
-    overflow: auto;
+  /* Libraries, folders and history scroll together, as one column, when they do not fit. */
+  .sections {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .history-section {
+    margin-top: auto;
+  }
+
+  /* The History heading is also its collapse toggle. */
+  .collapse {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: -4px;
+    padding: 2px 4px;
+    border: 0;
+    border-radius: var(--radius);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+  }
+
+  .collapse:hover {
+    background: var(--hover);
+    color: var(--fg);
   }
 
   .library,
@@ -319,9 +367,7 @@
   }
 
   .tree {
-    flex: 1;
-    min-height: 0;
-    overflow: auto;
+    flex: none;
   }
 
   .hint {

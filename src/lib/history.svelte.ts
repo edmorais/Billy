@@ -10,12 +10,20 @@ export const SIDEBAR_COUNT = 5;
 export const SIZE_MIN = 10;
 export const SIZE_MAX = 100;
 
-export const history = $state<{ enabled: boolean; size: number; view: ViewMode; library: number | null }>({
+export const history = $state<{
+  enabled: boolean;
+  size: number;
+  view: ViewMode;
+  library: number | null;
+  collapsed: boolean;
+}>({
   enabled: true,
   size: 30,
   view: "grid-m",
   /** The History view lists this library's documents only; `null` is every library. */
   library: null,
+  /** The sidebar's History section shows only its heading. */
+  collapsed: false,
 });
 
 /** Bumped when the history changes outside the reader (cleared, turned on or off). */
@@ -39,6 +47,7 @@ export async function clearHistory() {
 export function initHistory(saved: Record<string, unknown> | undefined) {
   const s = saved ?? {};
   if (typeof s.enabled === "boolean") history.enabled = s.enabled;
+  if (typeof s.collapsed === "boolean") history.collapsed = s.collapsed;
   if (typeof s.size === "number") history.size = Math.min(SIZE_MAX, Math.max(SIZE_MIN, Math.round(s.size)));
   if (typeof s.library === "number" || s.library === null) history.library = s.library as number | null;
   if (typeof s.view === "string" && ["grid-s", "grid-m", "grid-l", "details", "compact"].includes(s.view)) {
